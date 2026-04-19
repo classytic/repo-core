@@ -11,6 +11,18 @@
  * `RepositoryLike`.
  */
 
+/**
+ * Re-export the lookup IR from `repository/` too — consumers of
+ * `@classytic/repo-core/repository` expect the full contract surface
+ * there, and a separate `/lookup` subpath exists for kits that only
+ * want the types without the broader contract.
+ */
+export type {
+  LookupPopulateOptions,
+  LookupPopulateResult,
+  LookupRow,
+  LookupSpec,
+} from '../lookup/types.js';
 export { RepositoryBase, type RepositoryBaseOptions } from './base.js';
 export {
   PLUGIN_ORDER_CONSTRAINTS,
@@ -20,6 +32,13 @@ export {
   validatePluginOrder,
 } from './plugin-types.js';
 export type {
+  AggMeasure,
+  AggPaginationRequest,
+  AggRequest,
+  AggResult,
+  AggRow,
+  BulkWriteOperation,
+  BulkWriteResult,
   DeleteManyResult,
   DeleteOptions,
   DeleteResult,

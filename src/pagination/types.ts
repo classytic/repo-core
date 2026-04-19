@@ -121,7 +121,8 @@ export interface OffsetPaginationResultCore<TDoc> {
  */
 export type OffsetPaginationResult<
   TDoc,
-  TExtra extends Record<string, unknown> = Record<string, never>,
+  // biome-ignore lint/complexity/noBannedTypes: `{}` is intentional as the "no extras" default — `Record<string, never>` over-constrains the intersection and forces core fields to `never`.
+  TExtra extends Record<string, unknown> = {},
 > = OffsetPaginationResultCore<TDoc> & TExtra;
 
 /**
@@ -145,5 +146,6 @@ export interface KeysetPaginationResultCore<TDoc> {
  */
 export type KeysetPaginationResult<
   TDoc,
-  TExtra extends Record<string, unknown> = Record<string, never>,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale — `Record<string, never>` over-constrains the intersection.
+  TExtra extends Record<string, unknown> = {},
 > = KeysetPaginationResultCore<TDoc> & TExtra;

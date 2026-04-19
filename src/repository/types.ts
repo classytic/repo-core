@@ -11,10 +11,29 @@
  *
  * `StandardRepo<TDoc>` extends `MinimalRepo` with the recommended surface
  * (atomic CAS, compound filter reads, duplicate-key classification, soft
- * delete, batch ops, transactions). Kits targeting arc 2.10+ should aim for
- * this shape. Everything beyond it (aggregate, bulkWrite, custom builders)
- * stays kit-specific — see each kit's docs.
+ * delete, batch ops, portable aggregation, transactions). Kits targeting
+ * arc 2.10+ should aim for this shape. Kit-native power APIs that don't
+ * translate across backends (mongo pipeline, Drizzle builders, Prisma
+ * extensions) stay kit-specific — see each kit's docs.
  */
+
+import type { Filter } from '../filter/types.js';
+import type { LookupPopulateOptions, LookupPopulateResult } from '../lookup/types.js';
+import type { OffsetPaginationResult } from '../pagination/types.js';
+
+// ──────────────────────────────────────────────────────────────────────
+// Filter input type
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Accepted filter input across every repository method. A repository
+ * call can pass either a plain record (`{ status: 'active' }`) or a
+ * Filter IR node (`and(eq('status', 'active'), gt('age', 18))`) — every
+ * kit's compiler handles both forms. Kit-native power filters (raw SQL
+ * fragments, Mongo `$expr`) still live on the kit's own types; this
+ * union covers the portable path.
+ */
+export type FilterInput = Filter | Record<string, unknown>;
 
 // ──────────────────────────────────────────────────────────────────────
 // Transaction handle
@@ -129,6 +148,170 @@ export interface UpdateManyResult {
   modifiedCount: number;
   upsertedCount?: number;
   upsertedId?: unknown;
+}
+
+/**
+ * Heterogeneous bulk-write operation. Mongo-shaped so arc code written
+ * against mongokit's `bulkWrite` drops into any kit that implements the
+ * StandardRepo `bulkWrite?` method.
+ *
+ * Kit-specific constraints apply:
+ *
+ *   - SQL/Prisma kits evaluate `updateOne.update` as a flat column
+ *     overwrite, not a MongoDB operator expression (no `$set`, `$inc`).
+ *     Pass raw column values.
+ *   - `updateOne` / `replaceOne` on SQL kits typically route through a
+ *     SELECT-then-UPDATE because `UPDATE ... LIMIT 1` isn't portable.
+ *   - `upsert: true` on kits without a native compound unique key may
+ *     require the filter to be a flat-literal record (so the kit can
+ *     merge filter + update into an INSERT).
+ */
+export type BulkWriteOperation<TDoc = unknown> =
+  | { insertOne: { document: Partial<TDoc> } }
+  | {
+      updateOne: {
+        filter: Record<string, unknown>;
+        update: Record<string, unknown>;
+        upsert?: boolean;
+      };
+    }
+  | {
+      updateMany: {
+        filter: Record<string, unknown>;
+        update: Record<string, unknown>;
+        upsert?: boolean;
+      };
+    }
+  | { deleteOne: { filter: Record<string, unknown> } }
+  | { deleteMany: { filter: Record<string, unknown> } }
+  | {
+      replaceOne: {
+        filter: Record<string, unknown>;
+        replacement: Partial<TDoc>;
+        upsert?: boolean;
+      };
+    };
+
+/**
+ * Result envelope for `bulkWrite`. Mongo-shaped — arc's idempotency /
+ * outbox adapters read the same fields regardless of backend.
+ *
+ * `insertedIds` / `upsertedIds` are keyed by the operation's index in
+ * the input array, matching mongoose's convention.
+ */
+export interface BulkWriteResult {
+  ok?: number;
+  insertedCount?: number;
+  matchedCount?: number;
+  modifiedCount?: number;
+  deletedCount?: number;
+  upsertedCount?: number;
+  insertedIds?: Record<number, unknown>;
+  upsertedIds?: Record<number, unknown>;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Aggregation IR — portable shape for group-by / summary queries
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * A single named aggregation. Mongo-style operator names because they're
+ * the lowest common denominator across SQL and MongoDB — `count` / `sum`
+ * / `avg` / `min` / `max` / `countDistinct` map cleanly to both
+ * `COUNT(*)` + `GROUP BY` in SQL and `{ $group: { _id, x: { $sum: ... } } }`
+ * in Mongo.
+ *
+ * `count` is the only measure whose `field` is optional: `{ op: 'count' }`
+ * counts rows in the group (`COUNT(*)` / `$sum: 1`). With a field name
+ * it counts non-null values.
+ *
+ * Kit compilers normalize unknown ops to a runtime error — keep the set
+ * tight so aggregations compile identically everywhere.
+ */
+export type AggMeasure =
+  | { op: 'count'; field?: string }
+  | { op: 'countDistinct'; field: string }
+  | { op: 'sum'; field: string }
+  | { op: 'avg'; field: string }
+  | { op: 'min'; field: string }
+  | { op: 'max'; field: string };
+
+/**
+ * Portable aggregation request. Compiles to SQL (`SELECT ... WHERE ...
+ * GROUP BY ... HAVING ... ORDER BY ... LIMIT ... OFFSET`) on sqlitekit /
+ * pgkit and to a `[$match, $group, $match, $sort, $limit, $skip]`
+ * pipeline on mongokit. Output shape is identical either way: one row
+ * per group, keyed by `groupBy` fields + measure aliases.
+ *
+ * Without `groupBy`: returns a single row of scalar aggregates over the
+ * full filtered set. With `groupBy`: one row per distinct group.
+ *
+ * `filter` and `having` both reuse the Filter IR — `filter` narrows the
+ * rows that feed into the aggregate (WHERE), `having` narrows the
+ * aggregated result (HAVING). Use `having` to reference measure aliases
+ * (`{ field: 'revenue', op: 'gt', value: 1000 }`); kit compilers
+ * substitute the aggregate expression when the field matches a measure.
+ *
+ * Power features that don't translate across backends — `$lookup`,
+ * `$unwind`, window functions, CTEs — stay kit-native. Reach for
+ * mongokit's `aggregatePipeline` or sqlitekit's raw `repo.db` when you
+ * need them.
+ */
+export interface AggRequest {
+  /** Pre-aggregate predicate. Reuses Filter IR; compiles to WHERE / `$match`. */
+  filter?: unknown;
+  /** Grouping columns. Single string, array of strings, or omitted for scalar aggregation. */
+  groupBy?: string | readonly string[];
+  /**
+   * Named aggregations. At least one key required — an empty `measures`
+   * bag is a wiring bug (nothing to compute).
+   */
+  measures: Record<string, AggMeasure>;
+  /** Post-aggregate predicate. Reuses Filter IR; references measure aliases. */
+  having?: unknown;
+  /** Order the grouped rows. Keys may be `groupBy` fields or measure aliases. */
+  sort?: Record<string, 1 | -1>;
+  /** Row cap; applied after `having` + `sort`. */
+  limit?: number;
+  /** Skip N grouped rows. Paginated callers use `aggregatePaginate` instead. */
+  offset?: number;
+}
+
+/**
+ * Paginated variant of `AggRequest`. Returns the standard offset
+ * pagination envelope — same shape as `getAll({ page, limit })` so UI
+ * code renders aggregates and raw document lists with the same
+ * pagination primitives.
+ */
+export interface AggPaginationRequest extends Omit<AggRequest, 'limit' | 'offset'> {
+  /** 1-indexed page number. Defaults to 1. */
+  page?: number;
+  /** Rows per page. Defaults to the kit's standard limit. */
+  limit?: number;
+  /**
+   * `exact` runs `COUNT(DISTINCT groupBy)` (or `COUNT(*)` for scalar
+   * aggregates) alongside the data query. `none` skips the count
+   * entirely — the envelope's `total` / `pages` are 0 and `hasNext` is
+   * derived from a `LIMIT N+1` peek. Defaults to `exact`.
+   */
+  countStrategy?: 'exact' | 'none';
+}
+
+/**
+ * Shape of each row returned by `aggregate` / `aggregatePaginate`.
+ * Keys are the `groupBy` fields (when present) plus the measure
+ * aliases. Values are SQL-native scalars — numbers for count / sum /
+ * avg, the group-by column's native type for group keys.
+ *
+ * Generic defaults to `Record<string, unknown>` because cross-kit
+ * callers usually don't need the narrower type — cast at the call
+ * site with your own `interface RevenueByCategory { ... }` if you do.
+ */
+export type AggRow = Record<string, unknown>;
+
+/** Unpaginated aggregation result. Just an array — no envelope. */
+export interface AggResult<TRow extends AggRow = AggRow> {
+  rows: TRow[];
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -248,7 +431,7 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    * transaction — arc's stores assume single-round-trip semantics.
    */
   findOneAndUpdate?(
-    filter: Record<string, unknown>,
+    filter: FilterInput,
     update: Record<string, unknown> | Record<string, unknown>[],
     options?: FindOneAndUpdateOptions,
   ): Promise<TDoc | null>;
@@ -266,24 +449,17 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
 
   // ── Compound read ────────────────────────────────────────────────────
   /** Find a single doc by compound filter (used by arc's AccessControl). */
-  getOne?(filter: Record<string, unknown>, options?: QueryOptions): Promise<TDoc | null>;
+  getOne?(filter: FilterInput, options?: QueryOptions): Promise<TDoc | null>;
   /** Alias many kits expose alongside `getOne`. Arc checks both names. */
-  getByQuery?(filter: Record<string, unknown>, options?: QueryOptions): Promise<TDoc | null>;
+  getByQuery?(filter: FilterInput, options?: QueryOptions): Promise<TDoc | null>;
 
   // ── Projections & existence ──────────────────────────────────────────
-  count?(filter?: Record<string, unknown>, options?: QueryOptions): Promise<number>;
-  exists?(
-    filter: Record<string, unknown>,
-    options?: QueryOptions,
-  ): Promise<boolean | { _id: unknown } | null>;
-  distinct?<T = unknown>(
-    field: string,
-    filter?: Record<string, unknown>,
-    options?: QueryOptions,
-  ): Promise<T[]>;
-  findAll?(filter?: Record<string, unknown>, options?: QueryOptions): Promise<TDoc[]>;
+  count?(filter?: FilterInput, options?: QueryOptions): Promise<number>;
+  exists?(filter: FilterInput, options?: QueryOptions): Promise<boolean | { _id: unknown } | null>;
+  distinct?<T = unknown>(field: string, filter?: FilterInput, options?: QueryOptions): Promise<T[]>;
+  findAll?(filter?: FilterInput, options?: QueryOptions): Promise<TDoc[]>;
   getOrCreate?(
-    filter: Record<string, unknown>,
+    filter: FilterInput,
     data: Partial<TDoc>,
     options?: WriteOptions,
   ): Promise<TDoc | null>;
@@ -291,11 +467,66 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
   // ── Batch ────────────────────────────────────────────────────────────
   createMany?(items: Partial<TDoc>[], options?: WriteOptions): Promise<TDoc[]>;
   updateMany?(
-    filter: Record<string, unknown>,
+    filter: FilterInput,
     data: Record<string, unknown>,
     options?: WriteOptions,
   ): Promise<UpdateManyResult>;
-  deleteMany?(filter: Record<string, unknown>, options?: DeleteOptions): Promise<DeleteManyResult>;
+  deleteMany?(filter: FilterInput, options?: DeleteOptions): Promise<DeleteManyResult>;
+
+  /**
+   * Heterogeneous bulk write. Kits dispatch each op against the
+   * appropriate driver primitive inside a single transaction; see each
+   * kit's docs for the exact semantics of `upsert` and operator-shaped
+   * update values (mongokit honors `$set` etc., SQL kits treat `update`
+   * as a flat column overwrite).
+   */
+  bulkWrite?(operations: readonly BulkWriteOperation<TDoc>[]): Promise<BulkWriteResult>;
+
+  // ── Aggregation (portable IR) ────────────────────────────────────────
+
+  /**
+   * Portable aggregation. Compiles to `SELECT ... GROUP BY ...` on SQL
+   * kits and to a `[$match, $group, $sort, $limit]` pipeline on mongokit.
+   * Output shape (`{ rows }`) is identical across backends — dashboards
+   * and admin tooling read the same result regardless of the driver.
+   *
+   * Distinct from kit-native aggregation APIs (mongokit's
+   * `aggregatePipeline(stages)`, sqlitekit's raw `repo.db`) by design:
+   * those take backend-specific inputs and return backend-specific
+   * shapes, suited for joins / unwinds / window functions / CTEs. The
+   * portable `aggregate` covers the filter + group + measures + sort +
+   * limit subset that every backend supports — and nothing else, so
+   * the behavior stays identical across drivers.
+   */
+  aggregate?<TRow extends AggRow = AggRow>(req: AggRequest): Promise<AggResult<TRow>>;
+
+  /**
+   * Paginated aggregation. Returns the standard offset envelope so UI
+   * code paginates aggregated dashboards with the same primitives as
+   * raw document lists. `countStrategy: 'none'` skips the distinct-
+   * group count for infinite-scroll use.
+   */
+  aggregatePaginate?<TRow extends AggRow = AggRow>(
+    req: AggPaginationRequest,
+  ): Promise<OffsetPaginationResult<TRow>>;
+
+  // ── Lookup / join (portable IR) ──────────────────────────────────────
+
+  /**
+   * Paginated join. Compiles the portable `LookupSpec[]` to `$lookup`
+   * stages on mongokit or `LEFT JOIN` + `json_object()` / `json_group_array()`
+   * on sqlitekit. Each returned row carries the base doc plus one key
+   * per lookup's `as` (or `from` default). Output shape is identical
+   * across backends — dashboards and detail views stop being kit-specific.
+   *
+   * Scope is deliberate: single-level joins keyed on `localField` /
+   * `foreignField`. Pipeline-form `$lookup`, nested lookups, and
+   * backend-specific join kinds stay on the kit-native path
+   * (mongokit's `aggregatePipeline`, sqlitekit's raw Drizzle).
+   */
+  lookupPopulate?<TExtra extends Record<string, unknown> = Record<string, unknown>>(
+    options: LookupPopulateOptions<TDoc>,
+  ): Promise<LookupPopulateResult<TDoc, TExtra>>;
 
   // ── Soft delete ──────────────────────────────────────────────────────
   restore?(id: string, options?: QueryOptions): Promise<TDoc | null>;

@@ -12,6 +12,14 @@ into `@classytic/arc` unchanged.
 **✅ Integration works.** Arc 2.10 accepts both mongokit's `Repository` and
 sqlitekit's `SqliteRepository` via Arc's structural `RepositoryLike` contract,
 which is now a proper superset of `MinimalRepo<TDoc> & Partial<StandardRepo<TDoc>>`.
+
+**Latest status (v0.1.x round-trip):**
+- ✅ `HOOK_EVENTS` constant — shipped in `/hooks`, canonical MinimalRepo+StandardRepo op names.
+- ✅ `CacheAdapter` contract — shipped in `/cache`, `.delete()` (renamed from `.del()` for ecosystem consistency), `ttlSeconds`, `clear(pattern?)`.
+- ✅ `TExtra` generic on pagination — shipped. Arc pagination types structurally compatible.
+- ✅ `/query-parser`, `/context` — shipped, Arc doesn't consume them internally (each kit keeps its own parser; `RepositoryContext` is repo-layer).
+- ✅ Arc's `CacheStore` aligned to `CacheAdapter`: `.delete(key)`, `ttlSeconds`, `clear(pattern?)`, undefined-miss. Breaking change in Arc 2.10, no shims.
+- ✅ Arc-side test sweep: **4123/4132 pass** (1 pre-existing mongokit+mongodb-memory-server transaction test, orthogonal).
 Proven by:
 
 - Type-level assertion in `arc/src/adapters/repo-core-compat.ts` (CI gate, fails typecheck on drift)
@@ -100,7 +108,7 @@ entry: {
 - Drop the default entirely and let the repo choose when no sort is supplied
 - Document the requirement: "Arc resources default to `-createdAt` sort; define the field or override with `queryOptions`."
 
-### 2.4 ✅ repo-core — naming consistency (non-blocking, worth deciding)
+### 2.4 ✅ RESOLVED — repo-core shipped `TExtra` + naming alignment
 
 - Arc has `OffsetPaginatedResult<TDoc, TExtra = {}>` / `KeysetPaginatedResult<TDoc, TExtra = {}>` with a generic for kit metadata (`tookMs`, `region`, `cursor.version`).
 - repo-core has `OffsetPaginationResult<TDoc>` / `KeysetPaginationResult<TDoc>` (past-tense-vs-noun drift + no `TExtra`).
@@ -111,7 +119,7 @@ Neither is wrong, but the standard should pick one. Suggest:
 
 If repo-core adopts this, Arc will align in 2.10. If not, both shapes coexist (they're structurally compatible for the core fields).
 
-### 2.5 🤔 repo-core — should `HOOK_EVENTS` be published as a constant?
+### 2.5 ✅ RESOLVED — `HOOK_EVENTS` published
 
 **Observation:** Both kits use the same event name convention (`before:<op>`, `after:<op>`, `error:<op>`) but the canonical operation names aren't documented anywhere in repo-core. Mongokit uses `create | update | delete | findOneAndUpdate | getById | getAll | …`; sqlitekit follows the same pattern. A plugin author writing against `@classytic/repo-core/hooks` has to read both kits to know what to subscribe to.
 
@@ -125,7 +133,7 @@ repo.on(HOOK_EVENTS.BEFORE_CREATE, handler, { priority: HOOK_PRIORITY.POLICY });
 
 A multi-tenant plugin written against these constants works identically across mongokit + sqlitekit + pgkit without the plugin author needing to memorize operation names per kit.
 
-### 2.6 🤔 repo-core — publish a `CacheAdapter` contract?
+### 2.6 ✅ RESOLVED — `CacheAdapter` published, `.delete` finalized
 
 sqlitekit and mongokit both ship a `cache` plugin, and both take a `CacheAdapter` (memory, Redis, etc.). The adapter shape (`get / set / del / clear`) is identical between them — worth publishing from repo-core so Arc's `cache/QueryCache` can accept the same adapter too. Arc currently has its own `CacheStore` interface which is 95% the same but separately defined.
 
