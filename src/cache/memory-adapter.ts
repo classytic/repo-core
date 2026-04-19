@@ -28,7 +28,7 @@ export function createMemoryCacheAdapter(): CacheAdapter {
       const expiresAt = ttlSeconds === 0 ? 0 : now() + ttlSeconds * 1000;
       store.set(key, { value, expiresAt });
     },
-    del(key: string): void {
+    delete(key: string): void {
       store.delete(key);
     },
     clear(pattern?: string): void {
