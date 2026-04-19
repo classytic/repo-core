@@ -1,0 +1,110 @@
+{
+  "name": "@classytic/repo-core",
+  "version": "0.1.0",
+  "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design — no plugins ship here; each kit owns its own.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./hooks": {
+      "types": "./dist/hooks/index.d.mts",
+      "default": "./dist/hooks/index.mjs"
+    },
+    "./operations": {
+      "types": "./dist/operations/index.d.mts",
+      "default": "./dist/operations/index.mjs"
+    },
+    "./errors": {
+      "types": "./dist/errors/index.d.mts",
+      "default": "./dist/errors/index.mjs"
+    },
+    "./pagination": {
+      "types": "./dist/pagination/index.d.mts",
+      "default": "./dist/pagination/index.mjs"
+    },
+    "./repository": {
+      "types": "./dist/repository/index.d.mts",
+      "default": "./dist/repository/index.mjs"
+    },
+    "./filter": {
+      "types": "./dist/filter/index.d.mts",
+      "default": "./dist/filter/index.mjs"
+    },
+    "./query-parser": {
+      "types": "./dist/query-parser/index.d.mts",
+      "default": "./dist/query-parser/index.mjs"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.mts",
+      "default": "./dist/context/index.mjs"
+    },
+    "./cache": {
+      "types": "./dist/cache/index.d.mts",
+      "default": "./dist/cache/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "repository",
+    "repository-pattern",
+    "data-access",
+    "hooks",
+    "filter-ir",
+    "pagination",
+    "cursor-pagination",
+    "keyset-pagination",
+    "plugin-based",
+    "driver-agnostic",
+    "typescript",
+    "esm"
+  ],
+  "author": "Classytic <classytic.dev@gmail.com> (https://github.com/classytic)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/classytic/repo-core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/classytic/repo-core/issues"
+  },
+  "homepage": "https://github.com/classytic/repo-core#readme",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest run --project unit --project integration",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "vitest run --project e2e",
+    "test:all": "vitest run",
+    "test:watch": "vitest --project unit --project integration",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "biome check src tests",
+    "lint:fix": "biome check src tests --write",
+    "format": "biome format src tests --write",
+    "check": "biome ci src tests --diagnostic-level=error",
+    "knip": "knip",
+    "prepublishOnly": "npm run check && npm run build && npm run typecheck && npm test",
+    "publish:dry": "npm publish --dry-run --access public",
+    "publish:npm": "npm publish --access public"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@biomejs/biome": "^2.4.12",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^4.1.4",
+    "knip": "^6.3.0",
+    "publint": "^0.3.18",
+    "tsdown": "^0.21.8",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.4"
+  }
+}
