@@ -54,6 +54,12 @@ Changes landed in response to the Arc 2.10 maintainer's end-to-end integration r
 
 **Test delta**: 153 → 177 tests (24 new covering HOOK_EVENTS exhaustiveness, pagination TExtra narrowing, and CacheAdapter + stableStringify round-trip).
 
+### Unified `withTransaction` contract — mongokit caught up
+
+The `StandardRepo.withTransaction` contract at `@classytic/repo-core/repository` has always specified `fn: (txRepo: this) => Promise<T>` — the bound-tx shape sqlitekit has implemented since 0.1. Mongokit 3.9 deviated from the contract and passed a raw `ClientSession` instead. Mongokit 3.10 fixes that: its `withTransaction` now hands over a session-threaded proxy repository matching the canonical signature. Cross-kit plugins and apps that depend on `StandardRepo.withTransaction` now work identically against mongokit and sqlitekit — one contract, no kit-specific branches.
+
+The contract docstring in `src/repository/types.ts` was already accurate; this is the mongokit-side implementation catching up. See `@classytic/mongokit` 3.10 release notes for the migration diff — this is a **breaking change for mongokit 3.x users** but repo-core's shape is unchanged.
+
 ### Consumed by
 
 - **`@classytic/mongokit`** — `Repository extends RepositoryBase`; hook engine, plugin-order validator, and `HOOK_PRIORITY` sourced from repo-core. Ships its own Mongo-optimized plugins (unchanged from 3.9).
