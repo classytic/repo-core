@@ -20,7 +20,7 @@ describe('createMemoryCacheAdapter', () => {
     const adapter: CacheAdapter = createMemoryCacheAdapter();
     expect(typeof adapter.get).toBe('function');
     expect(typeof adapter.set).toBe('function');
-    expect(typeof adapter.del).toBe('function');
+    expect(typeof adapter.delete).toBe('function');
     expect(typeof adapter.clear).toBe('function');
   });
 
@@ -30,11 +30,11 @@ describe('createMemoryCacheAdapter', () => {
     expect(adapter.get('k1')).toEqual({ hello: 'world' });
   });
 
-  it('del removes a single key', () => {
+  it('delete removes a single key', () => {
     const adapter = createMemoryCacheAdapter();
     adapter.set('k1', 1);
     adapter.set('k2', 2);
-    adapter.del('k1');
+    adapter.delete('k1');
     expect(adapter.get('k1')).toBeUndefined();
     expect(adapter.get('k2')).toBe(2);
   });

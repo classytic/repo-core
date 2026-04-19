@@ -33,8 +33,16 @@ export interface CacheAdapter {
   /** Store a value with optional TTL (seconds). */
   set(key: string, value: unknown, ttlSeconds?: number): Promise<void> | void;
 
-  /** Delete a single key. No-op when the key doesn't exist. */
-  del(key: string): Promise<void> | void;
+  /**
+   * Delete a single key. No-op when the key doesn't exist.
+   *
+   * Named `delete` (not `del`) to match the rest of the ecosystem:
+   * `MinimalRepo.delete(id)` in this same package, JavaScript's native
+   * `Map.delete` / `Set.delete`, arc's `RepositoryLike.delete`, and every
+   * higher-level cache library (Keyv, etc.). Redis clients keep their
+   * own `.del()` method — adapter implementations translate.
+   */
+  delete(key: string): Promise<void> | void;
 
   /**
    * Invalidate keys matching a glob pattern (typically `prefix:*`), or
