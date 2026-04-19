@@ -50,6 +50,18 @@
       "types": "./dist/cache/index.d.mts",
       "default": "./dist/cache/index.mjs"
     },
+    "./schema": {
+      "types": "./dist/schema/index.d.mts",
+      "default": "./dist/schema/index.mjs"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.mts",
+      "default": "./dist/testing/index.mjs"
+    },
+    "./lookup": {
+      "types": "./dist/lookup/index.d.mts",
+      "default": "./dist/lookup/index.mjs"
+    },
     "./package.json": "./package.json"
   },
   "keywords": [
@@ -106,5 +118,13 @@
     "tsdown": "^0.21.8",
     "typescript": "^6.0.3",
     "vitest": "^4.1.4"
+  },
+  "peerDependencies": {
+    "vitest": "^3.0.0 || ^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   }
 }
