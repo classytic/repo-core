@@ -31,7 +31,11 @@ export function createMemoryCacheAdapter(): CacheAdapter {
     del(key: string): void {
       store.delete(key);
     },
-    delByPattern(pattern: string): void {
+    clear(pattern?: string): void {
+      if (pattern === undefined) {
+        store.clear();
+        return;
+      }
       // Simple glob: only `prefix:*` is supported.
       const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
       for (const key of store.keys()) {
