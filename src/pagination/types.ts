@@ -87,8 +87,11 @@ export interface DecodedCursor {
   values?: Record<string, unknown>;
 }
 
-/** Offset-paginated result envelope. */
-export interface OffsetPaginationResult<TDoc> {
+/**
+ * Core fields of an offset-paginated result. Don't consume this directly —
+ * use `OffsetPaginationResult<TDoc>` or `OffsetPaginationResult<TDoc, TExtra>`.
+ */
+export interface OffsetPaginationResultCore<TDoc> {
   method: 'offset';
   docs: TDoc[];
   page: number;
@@ -99,8 +102,33 @@ export interface OffsetPaginationResult<TDoc> {
   hasPrev: boolean;
 }
 
-/** Keyset-paginated result envelope. */
-export interface KeysetPaginationResult<TDoc> {
+/**
+ * Offset-paginated result envelope.
+ *
+ * `TExtra` lets kits surface typed extras alongside the core envelope —
+ * mongokit emits `warning?: string` on deep-page reads, pgkit could surface
+ * `queryPlan`, sqlitekit could surface vacuum hints. Defaults to `{}` so
+ * consumers that don't care see zero change (`OffsetPaginationResult<User>`
+ * behaves exactly as before).
+ *
+ * The `method: 'offset'` discriminant carries through the intersection so
+ * `if (result.method === 'offset')` narrowing keeps working.
+ *
+ * @example Kit extends with typed extras
+ * ```ts
+ * type MongokitPage<T> = OffsetPaginationResult<T, { warning?: string }>;
+ * ```
+ */
+export type OffsetPaginationResult<
+  TDoc,
+  TExtra extends Record<string, unknown> = Record<string, never>,
+> = OffsetPaginationResultCore<TDoc> & TExtra;
+
+/**
+ * Core fields of a keyset-paginated result. Don't consume this directly —
+ * use `KeysetPaginationResult<TDoc>` or `KeysetPaginationResult<TDoc, TExtra>`.
+ */
+export interface KeysetPaginationResultCore<TDoc> {
   method: 'keyset';
   docs: TDoc[];
   limit: number;
@@ -108,3 +136,14 @@ export interface KeysetPaginationResult<TDoc> {
   /** Cursor token for the next page, or `null` when there is none. */
   next: string | null;
 }
+
+/**
+ * Keyset-paginated result envelope.
+ *
+ * `TExtra` parallels `OffsetPaginationResult` — see that type's docstring
+ * for the rationale. Defaults to `{}`.
+ */
+export type KeysetPaginationResult<
+  TDoc,
+  TExtra extends Record<string, unknown> = Record<string, never>,
+> = KeysetPaginationResultCore<TDoc> & TExtra;

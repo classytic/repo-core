@@ -15,8 +15,9 @@ Repo-core is **infrastructure for kit authors.** End-users install a kit (mongok
 ## Subpaths
 
 ```ts
-// Hook engine + priority constants — the plugin lifecycle substrate every kit's repository uses.
-import { HOOK_PRIORITY, HookEngine } from '@classytic/repo-core/hooks';
+// Hook engine + priority constants + canonical event names. HOOK_EVENTS turns
+// raw strings into compile-checked constants so typos fail at build time.
+import { HOOK_EVENTS, HOOK_PRIORITY, HookEngine } from '@classytic/repo-core/hooks';
 
 // Abstract repository base + MinimalRepo / StandardRepo contracts + plugin types.
 import { RepositoryBase, type MinimalRepo, type Plugin } from '@classytic/repo-core/repository';
@@ -101,6 +102,42 @@ URL grammar:
 | `?select=name,email,-password`        | `{ name: 1, email: 1, password: 0 }`           |
 | `?page=2&limit=50`                    | pagination fields on ParsedQuery               |
 | `?after=eyJ2Ij...`                    | opaque keyset cursor                           |
+
+## Plugin-friendly event names
+
+```ts
+import { HOOK_EVENTS, HOOK_PRIORITY } from '@classytic/repo-core/hooks';
+
+// Cross-kit plugin — works identically on mongokit, sqlitekit, pgkit, prismakit.
+export function stampOrgId(orgId: string): Plugin {
+  return {
+    name: 'stamp-org-id',
+    apply(repo) {
+      repo.on(HOOK_EVENTS.BEFORE_CREATE, (ctx) => {
+        if (!ctx.data?.organizationId) ctx.data = { ...ctx.data, organizationId: orgId };
+      }, { priority: HOOK_PRIORITY.POLICY });
+    },
+  };
+}
+```
+
+Typos like `'before:craete'` become compile errors. Subscribing to an event a given kit doesn't emit is a silent no-op (that's how the hook engine works), so a plugin can safely wire listeners for the full standard set.
+
+## Typed result extras
+
+```ts
+import type { OffsetPaginationResult } from '@classytic/repo-core/pagination';
+
+// Kit adds a typed surface-level extra without breaking cross-kit substitutability.
+type MongokitPage<T> = OffsetPaginationResult<T, { warning?: string }>;
+
+function render(page: MongokitPage<User>) {
+  if (page.warning) showBanner(page.warning);
+  return page.docs.map(userRow);
+}
+```
+
+Default `TExtra` is `Record<string, never>` — `OffsetPaginationResult<User>` behaves identically before and after; the generic is free to ignore.
 
 ## Status
 
