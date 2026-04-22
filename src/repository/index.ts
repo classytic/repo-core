@@ -23,6 +23,12 @@ export type {
   LookupRow,
   LookupSpec,
 } from '../lookup/types.js';
+/**
+ * Re-export of `UpdateInput` for contract-surface convenience. The canonical
+ * home is `@classytic/repo-core/update` (which also exports the builders and
+ * compilers). Kits may import from either path — they name the same type.
+ */
+export type { UpdateInput } from '../update/types.js';
 export { RepositoryBase, type RepositoryBaseOptions } from './base.js';
 export {
   PLUGIN_ORDER_CONSTRAINTS,
@@ -42,6 +48,7 @@ export type {
   DeleteManyResult,
   DeleteOptions,
   DeleteResult,
+  FilterInput,
   FindOneAndUpdateOptions,
   InferDoc,
   MinimalRepo,
