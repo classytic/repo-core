@@ -20,6 +20,7 @@
 import type { Filter } from '../filter/types.js';
 import type { LookupPopulateOptions, LookupPopulateResult } from '../lookup/types.js';
 import type { OffsetPaginationResult } from '../pagination/types.js';
+import type { UpdateInput } from '../update/types.js';
 
 // ──────────────────────────────────────────────────────────────────────
 // Filter input type
@@ -326,7 +327,17 @@ export interface AggResult<TRow extends AggRow = AggRow> {
  * - **Raw** — neither; kit returns all matching docs (may be large).
  */
 export interface PaginationParams<TDoc = unknown> {
-  filters?: Partial<TDoc> & Record<string, unknown>;
+  /**
+   * Predicate narrowing the rows that feed into the list query. Accepts
+   * the portable Filter IR (`and(eq(...), gt(...))`) OR a flat kit-native
+   * record (`{ status: 'active', age: { $gt: 18 } }`). Every kit's
+   * `getAll` compiler handles both forms.
+   *
+   * The `Partial<TDoc>` intersection preserves the old "typed flat record"
+   * DX for callers that pass a POJO — they still get autocomplete on
+   * known document fields while the union branch allows the Filter IR.
+   */
+  filters?: (Partial<TDoc> & Record<string, unknown>) | Filter;
   sort?: string | Record<string, 1 | -1>;
   page?: number;
   limit?: number;
@@ -429,10 +440,28 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    * Required for arc's outbox, distributed-lock, and workflow-semaphore
    * patterns. Kits without atomic CAS should simulate it inside a
    * transaction — arc's stores assume single-round-trip semantics.
+   *
+   * **Update argument forms** (see {@link UpdateInput}):
+   *
+   *   1. `UpdateSpec` — portable IR built via `update({ set, unset, inc,
+   *      setOnInsert })`. Every kit compiles this to its native shape.
+   *      **Prefer this for portable code** (arc's infrastructure stores,
+   *      plugins targeting multiple backends).
+   *   2. `Record<string, unknown>` — kit-native raw record. mongokit
+   *      treats this as a Mongo operator document (`$set`, `$inc`,
+   *      `$unset`, ...). SQL kits treat it as flat column overwrites. Use
+   *      for kit-specific fast paths.
+   *   3. `Record<string, unknown>[]` — Mongo aggregation pipeline. Only
+   *      mongokit executes this; SQL kits throw `UnsupportedOperationError`.
+   *      Use for the rare cases where you need `$ifNull` / `$cond` /
+   *      `$toLower` to preserve invariants atomically (e.g. outbox's
+   *      `firstFailedAt`).
+   *
+   * Kits dispatch via `isUpdateSpec(update)` from `@classytic/repo-core/update`.
    */
   findOneAndUpdate?(
     filter: FilterInput,
-    update: Record<string, unknown> | Record<string, unknown>[],
+    update: UpdateInput,
     options?: FindOneAndUpdateOptions,
   ): Promise<TDoc | null>;
 
@@ -466,19 +495,45 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
 
   // ── Batch ────────────────────────────────────────────────────────────
   createMany?(items: Partial<TDoc>[], options?: WriteOptions): Promise<TDoc[]>;
-  updateMany?(
-    filter: FilterInput,
-    data: Record<string, unknown>,
-    options?: WriteOptions,
-  ): Promise<UpdateManyResult>;
-  deleteMany?(filter: FilterInput, options?: DeleteOptions): Promise<DeleteManyResult>;
 
   /**
-   * Heterogeneous bulk write. Kits dispatch each op against the
-   * appropriate driver primitive inside a single transaction; see each
-   * kit's docs for the exact semantics of `upsert` and operator-shaped
-   * update values (mongokit honors `$set` etc., SQL kits treat `update`
-   * as a flat column overwrite).
+   * Apply the same update to every matching document. Required — every
+   * `StandardRepo` kit must implement bulk update; arc's outbox,
+   * idempotency, and cleanup stores depend on it. `data` accepts the
+   * same three forms as {@link findOneAndUpdate}: portable `UpdateSpec`,
+   * kit-native raw record, or Mongo aggregation pipeline (mongokit-only).
+   *
+   * **Promoted from optional to required in repo-core 0.2.0** — sqlitekit
+   * and mongokit both ship this as a class primitive. Third-party kits
+   * that previously omitted it now need to implement. Kits that lack a
+   * native bulk-update primitive should fan out in a transaction.
+   */
+  updateMany(
+    filter: FilterInput,
+    data: UpdateInput,
+    options?: WriteOptions,
+  ): Promise<UpdateManyResult>;
+
+  /**
+   * Delete every document matching the filter. Required — symmetrically
+   * with `updateMany`. Pass `{ mode: 'hard' }` to bypass soft-delete
+   * interception; kits without soft-delete accept and ignore the flag.
+   *
+   * **Promoted from optional to required in repo-core 0.2.0.**
+   */
+  deleteMany(filter: FilterInput, options?: DeleteOptions): Promise<DeleteManyResult>;
+
+  /**
+   * Heterogeneous bulk write. Stays optional — kits dispatch each op
+   * against the appropriate driver primitive inside a single transaction;
+   * see each kit's docs for the exact semantics of `upsert` and
+   * operator-shaped update values (mongokit honors `$set` etc., SQL kits
+   * treat `update` as a flat column overwrite).
+   *
+   * Kept optional because the mongoose-shaped `BulkWriteOperation` has no
+   * clean SQL analogue beyond "loop and dispatch" — forcing every kit to
+   * implement it would push kits to ship a thin wrapper around updateMany
+   * / deleteMany that offers nothing over calling them directly.
    */
   bulkWrite?(operations: readonly BulkWriteOperation<TDoc>[]): Promise<BulkWriteResult>;
 

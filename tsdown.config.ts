@@ -10,6 +10,7 @@ export default defineConfig({
     'pagination/index': 'src/pagination/index.ts',
     'repository/index': 'src/repository/index.ts',
     'filter/index': 'src/filter/index.ts',
+    'update/index': 'src/update/index.ts',
     'query-parser/index': 'src/query-parser/index.ts',
     'context/index': 'src/context/index.ts',
     'cache/index': 'src/cache/index.ts',

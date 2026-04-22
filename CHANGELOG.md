@@ -4,7 +4,39 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-04-22
+
+### Added — Update IR (portable write-side primitive)
+
+- **New `@classytic/repo-core/update` subpath.** The write-side counterpart to `@classytic/repo-core/filter`. Plugins and arc's infrastructure stores compose an `UpdateSpec` once; each kit compiles it to its native shape.
+  - **Types:** `UpdateSpec` (tagged union on `op: 'update'`, four buckets: `set` / `unset` / `setOnInsert` / `inc`), `UpdateInput` (union of `UpdateSpec` | kit-native `Record<string, unknown>` | Mongo pipeline `Record<string, unknown>[]`).
+  - **Builders:** `update({ set, unset, setOnInsert, inc })` (root), `setFields`, `unsetFields(...f)`, `setOnInsertFields`, `incFields`, `combineUpdates(...specs)` (later-wins merge, `unset` de-duplicates).
+  - **Guards:** `isUpdateSpec` (routes portable IR to the compiler), `isUpdatePipeline` (lets SQL kits short-circuit with `UnsupportedOperationError`).
+  - **Compilers:** `compileUpdateSpecToMongo(spec)` emits `{ $set, $unset, $setOnInsert, $inc }`. `compileUpdateSpecToSql(spec)` emits a `SqlUpdatePlan` with `data` / `unset` / `inc` / `insertDefaults` buckets, leaving SQL generation (quoting, `ON CONFLICT`, parameter binding) to the kit.
+- **`StandardRepo.findOneAndUpdate` + `updateMany` widened to `UpdateInput`.** Accepts all three forms — portable `UpdateSpec`, kit-native record, Mongo aggregation pipeline. Kits dispatch with `isUpdateSpec`. The existing raw-record and pipeline paths remain unchanged; the IR is purely additive so consumers don't need to migrate. Arc's infrastructure stores (outbox, idempotency, audit) will switch to the IR over a subsequent release to close the "Mongo-shaped store" gap flagged in the April 2026 cross-surface review.
+
+**Motivation (Arc April 2026 review):** arc's `EventOutbox`, `IdempotencyStore`, and `AuditStore` adapters use Mongo operator records (`$set`, `$inc`, `$unset`, `$setOnInsert`, `$or`, `$lte`, ...) directly against `RepositoryLike.findOneAndUpdate`. That works on mongokit but fails on sqlitekit — whose `findOneAndUpdate` treats `data` as flat column overwrites and would literally set a column named `$set`. The Update IR closes the gap without forcing every kit to ship its own Mongo-operator compatibility layer.
+
+**Rationale for scope:** the IR covers the subset every backend supports (atomic set / unset / inc / insert-default). Kit-native features — Mongo `$push`/`$pull`/`$addToSet`, aggregation pipeline updates, Postgres `jsonb_set`, SQL `CASE` expressions — stay on the kit-native path via `UpdateInput`'s raw-record and pipeline forms. No lowest-common-denominator bloat; no feature loss for kits that already offer more.
+
+**Test delta**: 193 → 230 tests (37 new across `tests/unit/update/builders`, `/guard`, `/compile`).
+
+### Changed — breaking: `StandardRepo` write signatures
+
+`StandardRepo.findOneAndUpdate(filter, update, ...)` and `updateMany(filter, data, ...)` — the second parameter is now typed `UpdateInput` (was `Record<string, unknown> | Record<string, unknown>[]` and `Record<string, unknown>` respectively). Every call site that compiled against 0.1.0 keeps compiling: `Record<string, unknown>` and `Record<string, unknown>[]` are subtypes of `UpdateInput`. The break is on the **implementer** side — any kit that declared only the old parameter type no longer structurally satisfies `StandardRepo` under strict contravariance. mongokit 3.11.0 and sqlitekit 0.1.1 already ship with the widened signatures; third-party kits need to widen before bumping their `@classytic/repo-core` peer dep.
+
+### Changed — breaking: `updateMany` + `deleteMany` promoted to required members of `StandardRepo`
+
+Both methods were optional (`updateMany?` / `deleteMany?`) in 0.1.0; they're required in 0.2.0. Rationale: every real backend has a native bulk-update and bulk-delete primitive, and arc's infrastructure stores (outbox, idempotency, audit cleanup) assume both are callable without feature-detection. Leaving them optional invited the "forgot to wire `batchOperationsPlugin`" runtime `TypeError` footgun that earlier releases of mongokit shipped — with the promotion, the type system catches missing implementations at the kit boundary.
+
+**Impact**:
+- **Kits**: any kit declaring `class FooRepo<T> implements StandardRepo<T>` must provide `updateMany` and `deleteMany` or fail to compile. mongokit 3.11.0 and sqlitekit 0.1.1 both ship these as class primitives, so their conformance stays green.
+- **Consumers of `RepositoryLike<T> = MinimalRepo<T> & Partial<StandardRepo<T>>`** (arc's pattern) are unaffected — `Partial` reimposes optionality for feature detection at the arc adapter boundary. `if (repo.updateMany)` guards keep working.
+- `bulkWrite` stays optional — the mongoose-shaped `BulkWriteOperation` has no clean SQL analogue, and every kit would ship an uninteresting fan-out wrapper otherwise.
+
+### Naming — `UpdateInput` collision with mongokit
+
+`@classytic/repo-core/update` exports `UpdateInput` as the union `UpdateSpec | Record<string, unknown> | Record<string, unknown>[]`. `@classytic/mongokit` currently **also** exports a type named `UpdateInput<TDoc> = Partial<Omit<TDoc, '_id' | 'createdAt' | '__v'>>` — a completely different, document-typed shape used by `repo.update(id, data)`. If you write `import { UpdateInput } from '@classytic/mongokit'`, you get mongokit's generic; if you write `import type { UpdateInput } from '@classytic/repo-core/update'`, you get the union. Both names may appear in the same consumer file — import at least one with an alias (`import type { UpdateInput as UpdatePatch } from '@classytic/mongokit'`). mongokit will rename its local type in a follow-up release to close the collision permanently.
 
 ### Added
 - Phase 0 scaffold: package.json, tsconfig, tsdown, biome, vitest (4-tier), knip
