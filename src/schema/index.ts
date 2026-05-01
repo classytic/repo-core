@@ -17,10 +17,12 @@
 
 export {
   applyFieldRules,
+  applyNullable,
   collectFieldsToOmit,
   getImmutableFields,
   getSystemManagedFields,
   isFieldUpdateAllowed,
+  mergeFieldRuleConstraints,
   validateUpdateBody,
 } from './field-rules.js';
 export type { SchemaGenerator, SchemaGeneratorContext } from './generator.js';
