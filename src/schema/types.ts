@@ -36,6 +36,37 @@ export interface FieldRule {
    * narrow on the same flag.
    */
   hidden?: boolean;
+
+  // ────────────────────────────────────────────────────────────────────
+  // JSON Schema constraint metadata
+  //
+  // Portable per-field constraints layered onto the kit's generated
+  // property schema by `mergeFieldRuleConstraints`. Existing kit-emitted
+  // constraints win; these only fill gaps. All are valid JSON Schema
+  // keywords (draft-07 + draft-2019-09 `nullable` mapped via `type` tuple).
+  // ────────────────────────────────────────────────────────────────────
+
+  /** String minimum length — JSON Schema `minLength`. */
+  minLength?: number;
+  /** String maximum length — JSON Schema `maxLength`. */
+  maxLength?: number;
+  /** Number minimum — JSON Schema `minimum`. */
+  min?: number;
+  /** Number maximum — JSON Schema `maximum`. */
+  max?: number;
+  /** Regex pattern — JSON Schema `pattern`. */
+  pattern?: string;
+  /** Allowed values — JSON Schema `enum`. */
+  enum?: ReadonlyArray<string | number>;
+  /**
+   * Widen the property type to also accept `null`. Implemented as a
+   * draft-07 type tuple (`type: ['string','null']`) or anyOf branch
+   * (`anyOf: [..., { type: 'null' }]`). Existing nullability is
+   * preserved — never double-widens.
+   */
+  nullable?: boolean;
+  /** Human-readable description — JSON Schema `description`. */
+  description?: string;
 }
 
 /** Map of field name → FieldRule. */

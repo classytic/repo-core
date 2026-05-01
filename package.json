@@ -1,6 +1,6 @@
 {
   "name": "@classytic/repo-core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design — no plugins ship here; each kit owns its own.",
   "type": "module",
   "sideEffects": false,
@@ -69,6 +69,10 @@
     "./lookup": {
       "types": "./dist/lookup/index.d.mts",
       "default": "./dist/lookup/index.mjs"
+    },
+    "./adapter": {
+      "types": "./dist/adapter/index.d.mts",
+      "default": "./dist/adapter/index.mjs"
     },
     "./package.json": "./package.json"
   },
