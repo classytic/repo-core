@@ -1,6 +1,6 @@
 {
   "name": "@classytic/repo-core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design — no plugins ship here; each kit owns its own.",
   "type": "module",
   "sideEffects": false,
@@ -62,6 +62,10 @@
       "types": "./dist/testing/index.d.mts",
       "default": "./dist/testing/index.mjs"
     },
+    "./tenant": {
+      "types": "./dist/tenant/index.d.mts",
+      "default": "./dist/tenant/index.mjs"
+    },
     "./lookup": {
       "types": "./dist/lookup/index.d.mts",
       "default": "./dist/lookup/index.mjs"
@@ -108,13 +112,17 @@
     "format": "biome format src tests --write",
     "check": "biome ci src tests --diagnostic-level=error",
     "knip": "knip",
+    "push": "classytic-push",
     "prepublishOnly": "npm run check && npm run build && npm run typecheck && npm test",
+    "release:tag": "node -e \"require('child_process').execSync('npm run push -- v'+require('./package.json').version,{stdio:'inherit'})\"",
+    "release": "npm run push -- main && npm run release:tag && npm publish",
     "publish:dry": "npm publish --dry-run --access public",
     "publish:npm": "npm publish --access public"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
     "@biomejs/biome": "^2.4.12",
+    "@classytic/dev-tools": "^0.2.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^4.1.4",
     "knip": "^6.3.0",

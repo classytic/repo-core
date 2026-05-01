@@ -10,6 +10,7 @@
  * decoded cursor to a SQL/Mongo/Prisma WHERE clause lives in each kit.
  */
 
+export { isPaginatedResult, toCanonicalList } from './canonical.js';
 export {
   decodeCursor,
   encodeCursor,
@@ -30,12 +31,20 @@ export {
   validatePage,
 } from './offset.js';
 export type {
+  AggregatePaginationResponse,
+  AggregatePaginationResult,
+  AggregatePaginationResultCore,
+  AnyPaginationResult,
+  BareListResponse,
   CursorPayload,
   DecodedCursor,
+  KeysetPaginationResponse,
   KeysetPaginationResult,
   KeysetPaginationResultCore,
+  OffsetPaginationResponse,
   OffsetPaginationResult,
   OffsetPaginationResultCore,
+  PaginatedResponse,
   PaginationConfig,
   SortDirection,
   SortSpec,

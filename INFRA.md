@@ -11,9 +11,11 @@
 - Hook engine + priority constants
 - `OP_REGISTRY` / `PolicyKey` / `OperationDescriptor`
 - `Filter` IR (neutral filter AST + combinators + scope-injection helpers `buildTenantScope` / `mergeScope`)
-- Pagination abstractions (offset, keyset, cursor codec)
+- Pagination abstractions (offset, keyset, cursor codec) plus the canonical result types (`OffsetPaginationResult`, `KeysetPaginationResult`, `AggregatePaginationResult`, `PaginationResult`) and the wire helper `toCanonicalList()` — single source of truth (primitives' duplicate dropped, mongokit's local copies dropped)
 - URL → `ParsedQuery<Filter>` parser (front-end only, no driver emit)
-- Error envelope (`HttpError`, `createError`, `isDuplicateKeyError` contract)
+- Tenant config — `TenantConfig`, `TenantStrategy`, `TenantFieldType`, `resolveTenantConfig`, `DEFAULT_TENANT_CONFIG`, `ResolvedTenantConfig`. Kits' `MultiTenantOptions extends Pick<TenantConfig, ...>`.
+- Error envelope (`HttpError` throwable + `ErrorContract` wire + `ErrorDetail` + `ErrorCode` + `ERROR_CODES` + `toErrorContract()` + `statusToErrorCode()` + `createError` + `isDuplicateKeyError` contract). `ArcError implements HttpError`.
+- Schema generator interface — `SchemaGenerator<TModel>`, `SchemaGeneratorContext`, `isSchemaGenerator`. Kits ship compile-time conformance assertions; arc adapters typed against the canonical contract.
 - Abstract `RepositoryBase<TDoc>` class — ctor, hook wiring, `_buildContext`. No CRUD methods.
 - Cache contract — `CacheAdapter` interface + `stableStringify` + `createMemoryCacheAdapter` reference. No plugin here; kits compose their own cachePlugin on top.
 
