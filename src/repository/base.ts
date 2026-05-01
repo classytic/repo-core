@@ -55,6 +55,9 @@ export abstract class RepositoryBase {
     this.hooks = new HookEngine(options.hooks ?? 'async');
 
     const plugins = options.plugins ?? [];
+    for (let i = 0; i < plugins.length; i++) {
+      assertValidPlugin(plugins[i] as PluginType, this.modelName, i);
+    }
     validatePluginOrder(
       plugins,
       this.modelName,
@@ -66,6 +69,7 @@ export abstract class RepositoryBase {
 
   /** Install a plugin (object with `apply(repo)` or a plain function). */
   use(plugin: PluginType): this {
+    assertValidPlugin(plugin, this.modelName);
     if (typeof plugin === 'function') {
       plugin(this);
     } else {
@@ -167,5 +171,39 @@ export abstract class RepositoryBase {
   _cachedValue<T>(context: RepositoryContext): T | undefined {
     if (context['_cacheHit'] !== true) return undefined;
     return context['_cachedResult'] as T | undefined;
+  }
+}
+
+/**
+ * Reject malformed plugin entries before they reach `use()`.
+ *
+ * Caught the field-reported `new Repository(Model, ['organizationId'], ...)`
+ * crash where a tenant-field string array landed in the plugins slot and
+ * blew up with `TypeError: plugin.apply is not a function` deep inside the
+ * constructor. Validating shape up front turns that into a single, action-
+ * able error pointing at the offending index.
+ */
+function assertValidPlugin(plugin: PluginType, repoName: string, index?: number): void {
+  const where = typeof index === 'number' ? `plugin at index ${index}` : 'plugin';
+  if (plugin === null || plugin === undefined) {
+    throw new TypeError(
+      `[repo-core] Repository "${repoName}": ${where} is ${plugin === null ? 'null' : 'undefined'}. ` +
+        'Expected a function `(repo) => void` or an object `{ name, apply(repo) }`.',
+    );
+  }
+  if (typeof plugin === 'function') return;
+  if (typeof plugin !== 'object') {
+    const detail = typeof plugin === 'string' ? `'${plugin}'` : '';
+    throw new TypeError(
+      `[repo-core] Repository "${repoName}": ${where} has wrong type. ` +
+        `Expected a function or { name, apply(repo) } object — got ${typeof plugin} ${detail}. ` +
+        'Common cause: `new Repository(Model, [tenantField], opts)` — second argument must be a plugins array.',
+    );
+  }
+  if (typeof (plugin as { apply?: unknown }).apply !== 'function') {
+    throw new TypeError(
+      `[repo-core] Repository "${repoName}": ${where} is an object but missing \`apply(repo)\`. ` +
+        'Expected `{ name: string, apply: (repo) => void }`.',
+    );
   }
 }

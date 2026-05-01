@@ -23,6 +23,8 @@ export {
   isFieldUpdateAllowed,
   validateUpdateBody,
 } from './field-rules.js';
+export type { SchemaGenerator, SchemaGeneratorContext } from './generator.js';
+export { isSchemaGenerator } from './generator.js';
 export type {
   CrudSchemas,
   FieldRule,

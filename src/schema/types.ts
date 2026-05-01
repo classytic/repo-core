@@ -26,6 +26,16 @@ export interface FieldRule {
   systemManaged?: boolean;
   /** Remove from `required[]` in the generated schema. DB-level constraints unaffected. */
   optional?: boolean;
+  /**
+   * Strip the field from the response shape. Use for passwords, secrets,
+   * internal scoring — anything the server stores but should never echo.
+   *
+   * Distinct from `systemManaged` (which only affects request bodies):
+   * `hidden` is a *response* concern and lives at the schema-builder
+   * boundary so kits, OpenAPI tooling, and arc's response serializer
+   * narrow on the same flag.
+   */
+  hidden?: boolean;
 }
 
 /** Map of field name → FieldRule. */
@@ -59,9 +69,10 @@ export interface JsonSchema {
 }
 
 /**
- * CRUD schema bundle — the four JSON Schemas every HTTP endpoint needs:
- * body validation on POST / PATCH, route-param validation on id routes, and
- * query-string validation on list endpoints.
+ * CRUD schema bundle — the JSON Schemas every HTTP endpoint needs:
+ * body validation on POST / PATCH, route-param validation on id routes,
+ * query-string validation on list endpoints, and (optionally) response-shape
+ * documentation for OpenAPI / strict reply serialization.
  */
 export interface CrudSchemas {
   /** JSON Schema for create request body (POST). */
@@ -72,6 +83,23 @@ export interface CrudSchemas {
   params: JsonSchema;
   /** JSON Schema for list/query parameters. */
   listQuery: JsonSchema;
+  /**
+   * JSON Schema for response shape (optional).
+   *
+   * Includes every field a client receives — server-set fields
+   * (`createdAt`, `updatedAt`, `_id`, immutable / readonly fields) ARE
+   * returned to clients and so ARE included in the response shape, in
+   * contrast to `createBody` / `updateBody` which exclude them. Only
+   * `fieldRules[field].hidden: true` excludes a field from responses
+   * (passwords, secrets, internal scoring).
+   *
+   * Set `additionalProperties: true` so virtuals and computed fields
+   * pass through without being stripped by AJV's strict serialization.
+   *
+   * Optional — kits that don't ship a response builder leave it unset
+   * and arc treats response validation as opt-out for that resource.
+   */
+  response?: JsonSchema;
 }
 
 /**
@@ -82,6 +110,18 @@ export interface CrudSchemas {
 export interface SchemaBuilderOptions {
   /** Field rules for create/update schemas. */
   fieldRules?: FieldRules;
+  /**
+   * Global field exclusion — fields listed here are dropped from EVERY
+   * generated schema (create / update / response). Shortcut for setting
+   * `create.omitFields`, `update.omitFields`, AND `response.omitFields`
+   * to the same list. Use for fields that should never appear in any
+   * HTTP-facing schema (e.g. internal-only columns, framework-private
+   * fields).
+   *
+   * Per-purpose overrides still apply on top — a field listed here AND
+   * in `create.omitFields` is dropped once.
+   */
+  excludeFields?: string[];
   /**
    * When `true`, emit `"additionalProperties": false` on create/update/query
    * schemas. Default `false` so generators stay permissive by default;
@@ -125,6 +165,21 @@ export interface SchemaBuilderOptions {
   query?: {
     /** Extra filterable fields exposed on the list-query schema. */
     filterableFields?: Record<string, { type: string } | unknown>;
+  };
+
+  /**
+   * Response-schema overrides.
+   *
+   * Response shape includes server-set fields (`createdAt`, `updatedAt`,
+   * `_id`, immutable / readonly / systemManaged fields) since those ARE
+   * returned to clients. Only `fieldRules[field].hidden: true` fields are
+   * stripped automatically. Use `omitFields` to drop additional fields
+   * from responses without marking them globally hidden (e.g. internal
+   * scoring you want kept in update bodies but stripped from list reads).
+   */
+  response?: {
+    /** Extra fields to omit from the response shape. */
+    omitFields?: string[];
   };
 
   /**

@@ -4,6 +4,126 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-29
+
+### Added — Aggregate pagination shapes
+
+- `AggregatePaginationResultCore<TDoc>` and `AggregatePaginationResult<TDoc, TExtra>` join `Offset*` / `Keyset*` as the third pagination shape every kit reports. Mirrors offset (page / total / pages / hasNext / hasPrev) with `method: 'aggregate'` discriminant. Mongokit's existing local `AggregatePaginationResult` (3.10.x) becomes redundant — to be deleted in mongokit 4.0.
+- `AnyPaginationResult<TDoc, TExtra>` — union over the three result shapes. Use as the input type to anything that converts repo results into HTTP envelopes.
+
+### Added — HTTP wire envelopes
+
+The repository result shapes (`OffsetPaginationResult`, etc.) carry the `method` discriminant, so the corresponding HTTP wire envelope is just `{ success: true } & Result`. Adding the literal here closes the **server/client envelope mismatch** — arc's HTTP server was emitting flattened paginated responses without the `method` field while arc-next's typed responses required it.
+
+- `OffsetPaginationResponse<TDoc, TExtra>` = `{ success: true } & OffsetPaginationResult<TDoc, TExtra>`
+- `KeysetPaginationResponse<TDoc, TExtra>` = same for keyset
+- `AggregatePaginationResponse<TDoc, TExtra>` = same for aggregate
+- `BareListResponse<TDoc>` = `{ success: true; docs: TDoc[] }` for endpoints that don't paginate
+- `PaginatedResponse<TDoc, TExtra>` = union over all four. The discriminated-union contract is `success: true` literal first, `method` second — typed clients (arc-next, SDKs) narrow with `if (res.success && 'method' in res && res.method === 'offset')`.
+
+### Added — `toCanonicalList()` runtime normalizer
+
+```ts
+import { toCanonicalList } from '@classytic/repo-core/pagination';
+
+const result = await userRepo.getAll(query);
+reply.send(toCanonicalList(result));   // → PaginatedResponse<User>
+
+reply.send(toCanonicalList([u1, u2])); // → BareListResponse<User>
+```
+
+The single point where an internal `Result` becomes an external `Response`. Three overloads route bare arrays / paginated results to the right wire shape; `TExtra` fields (mongokit's `warning?: string`, etc.) flow through.
+
+**Subtle behavior**: `success: true` is stamped *after* the spread, so a stale `success: false` accidentally present on the input cannot override the literal — paginated success path is always `success: true`. Tested.
+
+### Added — `isPaginatedResult()` type guard
+
+Branches on the `method` discriminant rather than `Array.isArray`, so an empty paginated result still routes through the paginated branch. Used internally by `toCanonicalList`; exported for consumers writing custom envelope logic.
+
+### Test delta
+
+230 → 303 tests across 0.3.0. New coverage includes `tests/unit/pagination/canonical.test.ts` and the type-level coverage extensions in `result-types.test.ts` (35 tests landed with the aggregate / wire-envelope / `toCanonicalList` work), plus `tests/unit/repository/base-plugin-validation.test.ts` (6 tests for the `assertValidPlugin` guard).
+
+### Added — `SchemaGenerator<TModel>` interface in `/schema`
+
+Canonical contract for repository kits' CRUD-schema generators. Mongokit's `buildCrudSchemasFromModel` and sqlitekit's `buildCrudSchemasFromTable` (and any future kit's equivalent) `satisfies SchemaGenerator<TKitModel>` at the call site, so arc's `MongooseAdapter.schemaGenerator` / `DrizzleAdapter.schemaGenerator` accept them by structural typing — no glue, no inheritance, no inline function signatures duplicated in every adapter.
+
+- `SchemaGenerator<TModel = unknown>` — `(model, options?, context?) => CrudSchemas | Record<string, unknown>`.
+- `SchemaGeneratorContext` — resource-level context threaded at boot (`idField`, `resourceName`).
+- `isSchemaGenerator(value)` — runtime predicate (arity 1-3 functions). Conservative — doesn't invoke.
+
+Each kit ships a compile-time conformance check (same playbook as mongokit's `RepositoryLike` conformance gate):
+
+```ts
+const _conformance: SchemaGenerator<Model<unknown>> = buildCrudSchemasFromModel;
+```
+
+Drift surfaces in the kit's typecheck immediately, before any consumer sees it.
+
+10 new tests in `tests/unit/schema/generator.test.ts`. Total repo-core: 293 → 303.
+
+### Added — `errors` module: canonical wire + throwable error contract
+
+`@classytic/repo-core/errors` is now the single source of truth for error contracts across the org. Two complementary shapes:
+
+- **`HttpError extends Error`** — the *throwable* shape. Plain `Error` with `status`, optional `code`, `meta`, `validationErrors`, `duplicate`. Kits classify their driver-specific errors into this shape; framework layers (arc) catch and serialize. Existing `HttpError` extended in 0.3 with `code?: string` and `meta?: Record<string, unknown>` (mongokit had these locally pre-3.12).
+- **`ErrorContract`** — the *wire* shape (RFC 7807 / Stripe-style). What gets serialized to JSON responses, dead-letter records, audit trails, inter-service envelopes. Flat top-level `code` / `message` / `status` matches the org-wide `{ success, ... }` envelope convention.
+- **`ErrorDetail`** — single field-scoped error (path / code / message). `ErrorContract.details` is `ReadonlyArray<ErrorDetail>`.
+- **`ERROR_CODES` + `ErrorCode`** — canonical lowercase + snake_case codes (`'validation_error'`, `'not_found'`, `'conflict'`, `'unauthorized'`, `'forbidden'`, `'rate_limited'`, `'idempotency_conflict'`, `'precondition_failed'`, `'internal_error'`, `'service_unavailable'`, `'timeout'`). Domain packages extend hierarchically (`'order.validation.missing_line'`).
+- **`toErrorContract(error)`** — converts any `Error` / `HttpError` / non-`Error` value to the canonical wire `ErrorContract`. `code` cascade: explicit `error.code` → status-derived → `'internal_error'`. Flattens mongokit-shaped `validationErrors` and `duplicate.fields` into the canonical `details[]` array.
+- **`statusToErrorCode(status)`** — well-known HTTP status → canonical code. Conservative mapping; unknown statuses fall through to `'internal_error'` so domain handlers explicitly opt in.
+
+Consumed by mongokit (drops local `HttpError`), arc (`ArcError implements HttpError` with `status` getter), and any future kit / service. Relocated from `@classytic/primitives/errors` (which had `ErrorContract` + `ERROR_CODES` but not the throwable contract) — same playbook as the pagination, tenant, and events relocations: errors are infrastructure-shaped, not domain primitives.
+
+14 new tests in `tests/unit/errors/contract.test.ts`. Total repo-core: 279 → 293.
+
+### Added — `tenant` subpath (canonical home for tenant scope contract)
+
+New subpath `@classytic/repo-core/tenant` ships:
+- `TenantConfig` — static config (`strategy`, `enabled`, `tenantField`, `fieldType`, `ref`, `contextKey`, `required`, `resolve`).
+- `TenantStrategy = 'field' | 'none' | 'custom'`, `TenantFieldType = 'objectId' | 'string'`.
+- `ResolvedTenantConfig` — the resolved-with-defaults shape returned by `resolveTenantConfig`.
+- `DEFAULT_TENANT_CONFIG` — sensible org-wide defaults (`tenantField: 'organizationId'`, `fieldType: 'objectId'`, `ref: 'organization'`, `required: true`).
+- `resolveTenantConfig(config?)` — normaliser; validates `'custom'` strategy requires `resolve`.
+
+Relocated from `@classytic/primitives/tenant` (which has been removed in primitives 0.3 cleanup). Tenant scope is **infrastructure-shaped** — describes how queries get scoped, not a domain primitive like Money or Address. Repo-core is its proper home: it sits next to `context`, `filter`, `hooks`, `schema`, `cache` — every other repository contract — and lets mongokit / sqlitekit / future kits consume it through the existing `@classytic/repo-core` peer dep without pulling primitives just for one type.
+
+**Custom tenancy escape hatch** unchanged: `strategy: 'custom'` + `resolve: (ctx) => filterShape` covers multi-field composites, region+partner shards, hash-derived filters, anything that doesn't fit `field === id`.
+
+14 new tests in `tests/unit/tenant/resolve.test.ts` (ported from primitives' suite). Total repo-core: 265 → 279 tests.
+
+### Added — schema-builder vocabulary
+
+- **`SchemaBuilderOptions.excludeFields`** — global field exclusion. Fields listed here are dropped from create / update / response schemas in one place. Equivalent to setting `create.omitFields`, `update.omitFields`, AND `response.omitFields` to the same list. Use for fields that should never appear in any HTTP-facing schema.
+- **`SchemaBuilderOptions.response`** with `omitFields?: string[]` — response-schema overrides. Drops extra fields from the response shape without marking them globally hidden.
+- **`CrudSchemas.response?: JsonSchema`** — optional response-shape schema. Includes server-set fields (`createdAt`, `updatedAt`, `_id`, immutable / readonly / systemManaged) since those ARE returned to clients. Only `fieldRules[field].hidden: true` strips automatically. Set `additionalProperties: true` so virtuals / computed fields pass through.
+- **`FieldRule.hidden?: boolean`** — strips the field from the response shape. Distinct from `systemManaged` (request-body concern). Use for passwords, secrets, internal scoring.
+- **`collectFieldsToOmit(options, 'response')`** — third purpose alongside `'create'` / `'update'`. Implements the response policy (only `hidden` + `excludeFields` + `response.omitFields`).
+
+These are the contracts mongokit 3.12 implements, arc 2.12's MongooseAdapter consumes, and any future kit (sqlitekit, prismakit) inherits for free.
+
+### Hardened — `RepositoryBase` plugin-shape validation
+
+`RepositoryBase.use()` and the constructor's plugin loop now reject malformed plugin entries up front via `assertValidPlugin()`. The motivating field bug: `new Repository(Model, ['organizationId'], opts)` — passing a tenant-field string array where the constructor expected `plugins[]` — used to crash deep in the call site with `TypeError: plugin.apply is not a function`, cascade-failing every test that booted the app. The validator now throws a single descriptive `TypeError` at construction with the offending index and a hint about the common `tenantField`-in-the-wrong-slot mistake:
+
+```
+[repo-core] Repository "Foo": plugin at index 0 has wrong type.
+Expected a function or { name, apply(repo) } object — got string 'organizationId'.
+Common cause: `new Repository(Model, [tenantField], opts)` — second argument must be a plugins array.
+```
+
+Lock-in: `tests/unit/repository/base-plugin-validation.test.ts` (6 cases covering string/null/object-without-apply/function/object/post-construction `use()` paths).
+
+### Migration — mongokit 4.0, arc 2.12, arc-next 0.6
+
+Three downstream changes drop their local copies and import directly:
+
+1. **mongokit 4.0** — deletes its local `AggregatePaginationResult` declaration and `PaginationResult` union; consumers that imported them from `@classytic/mongokit` must switch to `@classytic/repo-core/pagination`. (Breaking.)
+2. **arc 2.12** — `fastifyAdapter` calls `toCanonicalList()` once instead of inline-flattening offset and falling through keyset/aggregate as nested `data`. Closes a real wire-envelope-mismatch bug.
+3. **arc-next 0.6** — adds `@classytic/repo-core` as peer dep, deletes its local `OffsetPaginationResponse` / `KeysetPaginationResponse` / `AggregatePaginationResponse` / `PaginatedResponse` types. Server and client now share one declaration — the `method` field asymmetry is impossible by construction.
+
+No breaking changes inside `@classytic/repo-core` itself — purely additive.
+
 ## [0.2.0] - 2026-04-22
 
 ### Added — Update IR (portable write-side primitive)

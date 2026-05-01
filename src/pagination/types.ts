@@ -149,3 +149,119 @@ export type KeysetPaginationResult<
   // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale — `Record<string, never>` over-constrains the intersection.
   TExtra extends Record<string, unknown> = {},
 > = KeysetPaginationResultCore<TDoc> & TExtra;
+
+/**
+ * Core fields of an aggregate-paginated result. Don't consume this directly —
+ * use `AggregatePaginationResult<TDoc>` or `AggregatePaginationResult<TDoc, TExtra>`.
+ *
+ * Aggregate pagination produces page-shaped envelopes from arbitrary aggregate
+ * pipelines (mongokit's `aggregatePaginate` / `aggregatePipelinePaginate`,
+ * pgkit's CTE-based windowed counts, etc). The shape mirrors offset because
+ * the math is the same — the discriminant exists so consumers can route
+ * "this came from an aggregate, not a plain find" without inspecting the
+ * pipeline.
+ */
+export interface AggregatePaginationResultCore<TDoc> {
+  method: 'aggregate';
+  docs: TDoc[];
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+/**
+ * Aggregate-paginated result envelope.
+ *
+ * `TExtra` parallels `OffsetPaginationResult` — kits surface deep-pagination
+ * warnings (`warning?: string`), aggregate-specific stats, etc.
+ */
+export type AggregatePaginationResult<
+  TDoc,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
+  TExtra extends Record<string, unknown> = {},
+> = AggregatePaginationResultCore<TDoc> & TExtra;
+
+/**
+ * Union of every pagination *result* shape (server-side, pre-wire).
+ *
+ * What kits return from `getAll` / `aggregatePaginate`. Use this as the
+ * input type to anything that converts repo results into HTTP envelopes —
+ * see {@link toCanonicalList}.
+ */
+export type AnyPaginationResult<
+  TDoc,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
+  TExtra extends Record<string, unknown> = {},
+> =
+  | OffsetPaginationResult<TDoc, TExtra>
+  | KeysetPaginationResult<TDoc, TExtra>
+  | AggregatePaginationResult<TDoc, TExtra>;
+
+// ============================================================================
+// HTTP wire envelopes
+// ============================================================================
+//
+// These are what an HTTP server emits and a typed client expects. They're
+// the corresponding `*Result` shape intersected with `{ success: true }`.
+//
+// Why `success: true` (literal, not `boolean`):
+//   - Errors take a different shape (`{ success: false, error, ... }`) — locking
+//     the literal lets a client-side type guard discriminate via `success` AND
+//     `method` cleanly.
+//   - Server-side, paginated success paths only ever emit `success: true`. The
+//     literal documents that contract instead of leaving it implicit.
+//
+// Why these live here (not `repo-core/wire`):
+//   - The `*Result` types already carry the `method` discriminant and align
+//     with what an HTTP client receives byte-for-byte plus the `success` flag.
+//     A separate subpath would force every wire-aware consumer to import twice.
+
+/** HTTP success envelope wrapping {@link OffsetPaginationResult}. */
+export type OffsetPaginationResponse<
+  TDoc,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
+  TExtra extends Record<string, unknown> = {},
+> = { success: true } & OffsetPaginationResult<TDoc, TExtra>;
+
+/** HTTP success envelope wrapping {@link KeysetPaginationResult}. */
+export type KeysetPaginationResponse<
+  TDoc,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
+  TExtra extends Record<string, unknown> = {},
+> = { success: true } & KeysetPaginationResult<TDoc, TExtra>;
+
+/** HTTP success envelope wrapping {@link AggregatePaginationResult}. */
+export type AggregatePaginationResponse<
+  TDoc,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
+  TExtra extends Record<string, unknown> = {},
+> = { success: true } & AggregatePaginationResult<TDoc, TExtra>;
+
+/**
+ * Bare list envelope — a successful response that wasn't paginated (raw
+ * array result). No `method` discriminant; consumers branch on the absence
+ * of pagination fields. Most useful when an endpoint sometimes paginates
+ * and sometimes returns a fixed-size list.
+ */
+export interface BareListResponse<TDoc> {
+  success: true;
+  docs: TDoc[];
+}
+
+/**
+ * Union of every wire envelope a paginated/list endpoint can emit. Locked
+ * to `success: true` because errors take a separate envelope shape — a
+ * client-side type guard checks `success` first, then `method`.
+ */
+export type PaginatedResponse<
+  TDoc,
+  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
+  TExtra extends Record<string, unknown> = {},
+> =
+  | OffsetPaginationResponse<TDoc, TExtra>
+  | KeysetPaginationResponse<TDoc, TExtra>
+  | AggregatePaginationResponse<TDoc, TExtra>
+  | BareListResponse<TDoc>;

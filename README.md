@@ -28,14 +28,34 @@ import { and, eq, gte, in_, like, buildTenantScope, matchFilter } from '@classyt
 // URL → ParsedQuery grammar. Backend frameworks (Express/Arc/Fastify) parse req.query here.
 import { parseUrl } from '@classytic/repo-core/query-parser';
 
-// Pagination primitives — cursor codec, keyset helpers, offset math.
-import { encodeCursor, decodeCursor, validateKeysetSort } from '@classytic/repo-core/pagination';
+// Pagination primitives — cursor codec, keyset helpers, offset math, the canonical
+// result types (`OffsetPaginationResult`, `KeysetPaginationResult`,
+// `AggregatePaginationResult`, `PaginationResult`) and the wire helper
+// `toCanonicalList()`. Single source of truth — primitives' duplicate dropped,
+// mongokit/sqlitekit re-export from here.
+import { encodeCursor, decodeCursor, validateKeysetSort, toCanonicalList } from '@classytic/repo-core/pagination';
+import type { OffsetPaginationResult, KeysetPaginationResult, AggregatePaginationResult, PaginationResult } from '@classytic/repo-core/pagination';
+
+// Tenant config — the canonical `TenantConfig`, `TenantStrategy`, `TenantFieldType`,
+// `resolveTenantConfig`, `DEFAULT_TENANT_CONFIG`, `ResolvedTenantConfig`. Kits'
+// `MultiTenantOptions extends Pick<TenantConfig, ...>`.
+import { resolveTenantConfig, DEFAULT_TENANT_CONFIG } from '@classytic/repo-core/tenant';
+import type { TenantConfig, ResolvedTenantConfig } from '@classytic/repo-core/tenant';
 
 // Cache plumbing — the CacheAdapter interface every kit's cachePlugin writes against.
 import { type CacheAdapter, stableStringify, createMemoryCacheAdapter } from '@classytic/repo-core/cache';
 
-// HTTP error envelope + duplicate-key contract.
-import { createError, conservativeMongoIsDuplicateKey } from '@classytic/repo-core/errors';
+// Error contracts — `HttpError` throwable + `ErrorContract` wire shape +
+// `ErrorDetail` + `ErrorCode` + `ERROR_CODES` + `toErrorContract()` +
+// `statusToErrorCode()`. Single source of truth — primitives' errors module dropped,
+// mongokit's local `HttpError` dropped, `ArcError implements HttpError`.
+import { toErrorContract, statusToErrorCode, ERROR_CODES, createError, conservativeMongoIsDuplicateKey } from '@classytic/repo-core/errors';
+import type { HttpError, ErrorContract, ErrorDetail, ErrorCode } from '@classytic/repo-core/errors';
+
+// Schema generator interface — kits ship `SchemaGenerator<TModel>` + the
+// compile-time conformance assertion; arc adapters are typed against it.
+import type { SchemaGenerator, SchemaGeneratorContext } from '@classytic/repo-core/schema';
+import { isSchemaGenerator } from '@classytic/repo-core/schema';
 
 // Operation registry (for arc-level policy dispatch + doc generation).
 import { CORE_OP_REGISTRY, describe } from '@classytic/repo-core/operations';
@@ -141,11 +161,12 @@ Default `TExtra` is `Record<string, never>` — `OffsetPaginationResult<User>` b
 
 ## Status
 
-**v0.1.0 — initial release.**
+**v0.3.0 — canonical contracts release.** Pagination types + wire envelope, tenant config, error contracts, and the `SchemaGenerator<TModel>` interface relocated from primitives / mongokit / arc to single sources of truth here.
 
 Consumed by:
-- `@classytic/mongokit` ≥ 3.10 — `Repository extends RepositoryBase`; hook engine, plugin-order validator, `HOOK_PRIORITY` sourced from repo-core. Mongokit's own `QueryParser` remains standalone (emits Mongo `$`-objects) but implements the same URL grammar by convention.
-- `@classytic/sqlitekit` (in development) — `SqliteRepository extends RepositoryBase`; Filter IR compiled to Drizzle / raw SQL natively. Uses `parseUrl` directly for URL parsing.
+- `@classytic/mongokit` ≥ 3.12 — `Repository extends RepositoryBase`; hook engine, plugin-order validator, `HOOK_PRIORITY` sourced from repo-core. Pagination + `HttpError` types now flow from repo-core (mongokit's local copies dropped). `MultiTenantOptions extends Pick<TenantConfig, ...>`. `buildCrudSchemasFromModel` ships a compile-time `SchemaGenerator<TModel>` conformance assertion. Mongokit's own `QueryParser` remains standalone.
+- `@classytic/sqlitekit` ≥ 0.2 — `SqliteRepository extends RepositoryBase`; Filter IR compiled to Drizzle / raw SQL natively. `MultiTenantOptions extends Pick<TenantConfig, ...>`. `buildCrudSchemasFromTable` ships the same `SchemaGenerator` conformance assertion.
+- `@classytic/arc` ≥ 2.12 — adapters typed against `SchemaGenerator<TModel>`; `ArcError implements HttpError`; pagination wire envelope (`method` discriminant) emitted via `toCanonicalList()` with `reply.sendList()`.
 
 See [INFRA.md](./INFRA.md) for the architectural principles, subpath map, build/tooling decisions, and the roadmap for pgkit / prismakit.
 

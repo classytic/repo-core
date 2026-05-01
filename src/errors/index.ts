@@ -7,6 +7,7 @@
  * kits ship their own driver-specific classifiers.
  */
 
+export { statusToErrorCode, toErrorContract } from './contract.js';
 export { createError, isHttpError } from './create-error.js';
 export {
   conservativeMongoIsDuplicateKey,
@@ -14,4 +15,12 @@ export {
   type ToDuplicateKeyHttpErrorOptions,
   toDuplicateKeyHttpError,
 } from './duplicate-key.js';
-export type { DuplicateKeyMeta, HttpError, ValidationErrorMeta } from './types.js';
+export {
+  type DuplicateKeyMeta,
+  ERROR_CODES,
+  type ErrorCode,
+  type ErrorContract,
+  type ErrorDetail,
+  type HttpError,
+  type ValidationErrorMeta,
+} from './types.js';

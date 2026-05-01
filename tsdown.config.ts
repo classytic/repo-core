@@ -17,6 +17,7 @@ export default defineConfig({
     'schema/index': 'src/schema/index.ts',
     'testing/index': 'src/testing/index.ts',
     'lookup/index': 'src/lookup/index.ts',
+    'tenant/index': 'src/tenant/index.ts',
   },
   outputOptions: {
     preserveModules: true,

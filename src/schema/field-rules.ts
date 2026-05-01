@@ -16,23 +16,52 @@ import type { JsonSchema, SchemaBuilderOptions, ValidationResult } from './types
 /**
  * Collect the set of fields that must NOT appear in a generated schema.
  *
- * Combines four sources in priority order:
- *   1. Always-hidden system fields (`createdAt`, `updatedAt`, `__v`).
- *   2. `fieldRules[field].systemManaged` → hidden from both create & update.
- *   3. For update schemas: `fieldRules[field].immutable` /
- *      `immutableAfterCreate` → hidden from update only.
- *   4. `options.create.omitFields` / `options.update.omitFields` — explicit
- *      caller-provided omit list for the matching purpose.
+ * Three purposes have three different policies:
+ *
+ *   - `'create'` / `'update'` (request-body schemas):
+ *     1. Always-hidden system fields (`createdAt`, `updatedAt`, `__v`).
+ *     2. `fieldRules[field].systemManaged` → hidden from both.
+ *     3. `'update'` only: `fieldRules[field].immutable` /
+ *        `immutableAfterCreate` → hidden from update.
+ *     4. `options.create.omitFields` / `options.update.omitFields` —
+ *        explicit caller-provided omit list for the matching purpose.
+ *
+ *   - `'response'` (response-shape schema):
+ *     1. `fieldRules[field].hidden: true` ONLY — passwords, secrets,
+ *        internal scoring. Server-set fields (`createdAt`, `updatedAt`,
+ *        `_id`, systemManaged, immutable / readonly) ARE returned to
+ *        clients and so ARE included in the response shape.
+ *     2. `options.response?.omitFields` — explicit caller-provided omit
+ *        list when the host wants to strip extra fields from responses
+ *        without marking them `hidden` globally.
  *
  * Returns a fresh `Set<string>` so callers can freely mutate.
  */
 export function collectFieldsToOmit(
   options: SchemaBuilderOptions,
-  purpose: 'create' | 'update',
+  purpose: 'create' | 'update' | 'response',
 ): Set<string> {
-  const result = new Set(['createdAt', 'updatedAt', '__v']);
   const rules = options?.fieldRules ?? {};
 
+  // Global `excludeFields` applies to every purpose — request bodies AND
+  // response. Pre-seed the set so per-purpose logic builds on it.
+  const globalExcludes = options?.excludeFields ?? [];
+
+  if (purpose === 'response') {
+    // Response policy: keep server-set fields, strip only `hidden`.
+    const result = new Set<string>(globalExcludes);
+    for (const [field, rule] of Object.entries(rules)) {
+      if (rule.hidden) result.add(field);
+    }
+    const explicit = options?.response?.omitFields;
+    if (explicit) {
+      for (const f of explicit) result.add(f);
+    }
+    return result;
+  }
+
+  // Request-body policy (create + update).
+  const result = new Set(['createdAt', 'updatedAt', '__v', ...globalExcludes]);
   for (const [field, rule] of Object.entries(rules)) {
     if (rule.systemManaged) result.add(field);
     if (purpose === 'update' && (rule.immutable || rule.immutableAfterCreate)) {
