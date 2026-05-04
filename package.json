@@ -1,6 +1,6 @@
 {
   "name": "@classytic/repo-core",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design — no plugins ship here; each kit owns its own.",
   "type": "module",
   "sideEffects": false,
@@ -74,6 +74,18 @@
       "types": "./dist/adapter/index.d.mts",
       "default": "./dist/adapter/index.mjs"
     },
+    "./better-auth": {
+      "types": "./dist/better-auth/index.d.mts",
+      "default": "./dist/better-auth/index.mjs"
+    },
+    "./aggregate": {
+      "types": "./dist/aggregate/index.d.mts",
+      "default": "./dist/aggregate/index.mjs"
+    },
+    "./plugins": {
+      "types": "./dist/plugins/index.d.mts",
+      "default": "./dist/plugins/index.mjs"
+    },
     "./package.json": "./package.json"
   },
   "keywords": [
@@ -109,6 +121,7 @@
     "test:e2e": "vitest run --project e2e",
     "test:all": "vitest run",
     "test:watch": "vitest --project unit --project integration",
+    "bench": "vitest bench --run --project bench",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "lint": "biome check src tests",
@@ -129,6 +142,7 @@
     "@classytic/dev-tools": "^0.2.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^4.1.4",
+    "fast-check": "^4.7.0",
     "knip": "^6.3.0",
     "publint": "^0.3.18",
     "tsdown": "^0.21.8",

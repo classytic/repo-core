@@ -14,6 +14,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { and, eq, gt, in_, isNull, like, ne, or } from '../filter/index.js';
+import type { OffsetPaginationResult } from '../pagination/types.js';
+import type { KeysetAggPaginationResult } from '../repository/types.js';
 import type { ConformanceContext, ConformanceDoc, ConformanceHarness } from './types.js';
 
 // ──────────────────────────────────────────────────────────────────────
@@ -42,6 +44,21 @@ function isoAt(offsetSeconds: number): string {
 export function runStandardRepoConformance<TDoc extends ConformanceDoc = ConformanceDoc>(
   harness: ConformanceHarness<TDoc>,
 ): void {
+  // Gate helpers — read once at suite-build time for `it.skipIf`.
+  // Each gate is `true` when the feature should be tested. The
+  // top-level `aggregate` flag is required for any aggregate
+  // scenario; per-op flags AND-into the top-level gate so a kit
+  // that flips `aggregate: false` skips all of them with one switch.
+  const ops = harness.features.aggregateOps;
+  const aggGate = harness.features.aggregate;
+  const skipNoAgg = !aggGate;
+  const skipNoTopN = !aggGate || !ops?.topN;
+  const skipNoPercentile = !aggGate || !ops?.percentile;
+  const skipNoCustomBuckets = !aggGate || !ops?.customDateBuckets;
+  const skipNoSubMinuteBuckets = !aggGate || !ops?.dateBucketSubMinute;
+  const skipNoStddev = !aggGate || !ops?.stddev;
+  const skipNoCache = !aggGate || !ops?.cache;
+
   describe(`[conformance] ${harness.name}`, () => {
     let ctx: ConformanceContext<TDoc>;
 
@@ -99,15 +116,16 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
         expect(miss).toBeNull();
       });
 
-      it('delete by id succeeds; second delete returns success:false', async () => {
+      it('delete by id succeeds; second delete returns null (miss)', async () => {
         const created = await ctx.repo.create(harness.makeDoc({ name: 'Carol' }));
         const id = idOf(created, harness.idField)!;
 
         const first = await ctx.repo.delete(id);
-        expect(first.success).toBe(true);
+        expect(first).not.toBeNull();
+        expect(first?.message).toBeDefined();
 
         const second = await ctx.repo.delete(id);
-        expect(second.success).toBe(false);
+        expect(second).toBeNull();
       });
     });
 
@@ -303,20 +321,17 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
         ]);
       });
 
-      it.skipIf(!harness.features.aggregate)(
-        'empty result set returns { rows: [] } (no throw)',
-        async () => {
-          if (!ctx.repo.aggregate) return;
-          const result = await ctx.repo.aggregate({
-            filter: { category: 'does-not-exist' },
-            groupBy: 'category',
-            measures: { total: { op: 'sum', field: 'count' } },
-          });
-          expect(result.rows).toEqual([]);
-        },
-      );
+      it.skipIf(skipNoAgg)('empty result set returns { rows: [] } (no throw)', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate({
+          filter: { category: 'does-not-exist' },
+          groupBy: 'category',
+          measures: { total: { op: 'sum', field: 'count' } },
+        });
+        expect(result.rows).toEqual([]);
+      });
 
-      it.skipIf(!harness.features.aggregate)(
+      it.skipIf(skipNoAgg)(
         'groupBy + sum produces one row per group with correct totals',
         async () => {
           if (!ctx.repo.aggregate) return;
@@ -335,33 +350,680 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
         },
       );
 
-      it.skipIf(!harness.features.aggregate)(
-        'scalar aggregate (no groupBy) returns single row',
+      it.skipIf(skipNoAgg)('scalar aggregate (no groupBy) returns single row', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{ total: number; n: number }>({
+          measures: {
+            total: { op: 'sum', field: 'count' },
+            n: { op: 'count' },
+          },
+        });
+        expect(result.rows).toHaveLength(1);
+        expect(Number(result.rows[0]?.total)).toBe(100);
+        expect(Number(result.rows[0]?.n)).toBe(4);
+      });
+
+      it.skipIf(skipNoAgg)('having filters aggregated rows by measure alias', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{ category: string; total: number }>({
+          groupBy: 'category',
+          measures: { total: { op: 'sum', field: 'count' } },
+          having: gt('total', 50),
+        });
+        expect(result.rows).toHaveLength(1);
+        expect((result.rows[0] as { category: string }).category).toBe('admin');
+      });
+
+      // ── Filtered measures ─────────────────────────────────────────
+      // Per-measure `where` predicates scope the aggregate to a subset
+      // of rows within each group — equivalent to SQL's
+      // `SUM(amount) FILTER (WHERE status = 'paid')`. Same input
+      // AggRequest produces the same rows on every kit; cross-kit
+      // dashboards stay byte-stable.
+
+      it.skipIf(skipNoAgg)('filtered sum/count: KPI tiles side-by-side', async () => {
+        if (!ctx.repo.aggregate) return;
+        // Seeded fixture from the parent describe:
+        //   a (reader, active, 10), b (reader, active, 20)
+        //   c (admin, INACTIVE, 30), d (admin, active, 40)
+        const result = await ctx.repo.aggregate<{
+          category: string;
+          activeCount: number;
+          inactiveCount: number;
+          activeTotal: number;
+          grandTotal: number;
+        }>({
+          groupBy: 'category',
+          measures: {
+            activeCount: { op: 'count', where: eq('active', true) },
+            inactiveCount: { op: 'count', where: eq('active', false) },
+            activeTotal: {
+              op: 'sum',
+              field: 'count',
+              where: eq('active', true),
+            },
+            grandTotal: { op: 'sum', field: 'count' },
+          },
+          sort: { category: 1 },
+        });
+        expect(result.rows).toEqual([
+          {
+            category: 'admin',
+            activeCount: 1,
+            inactiveCount: 1,
+            activeTotal: 40,
+            grandTotal: 70,
+          },
+          {
+            category: 'reader',
+            activeCount: 2,
+            inactiveCount: 0,
+            activeTotal: 30,
+            grandTotal: 30,
+          },
+        ]);
+      });
+
+      it.skipIf(skipNoAgg)(
+        'filtered avg ignores non-matching rows (no bias toward 0)',
         async () => {
           if (!ctx.repo.aggregate) return;
-          const result = await ctx.repo.aggregate<{ total: number; n: number }>({
+          // Avg count of admin rows where active=true should be 40
+          // (only `d` qualifies) — `c` (inactive, 30) must NOT pull
+          // the average down. Naive impls coerce non-matches to 0 and
+          // divide, getting 35; the right answer is 40.
+          const result = await ctx.repo.aggregate<{ avgActive: number | null }>({
+            filter: eq('category', 'admin'),
             measures: {
-              total: { op: 'sum', field: 'count' },
-              n: { op: 'count' },
+              avgActive: {
+                op: 'avg',
+                field: 'count',
+                where: eq('active', true),
+              },
             },
           });
-          expect(result.rows).toHaveLength(1);
-          expect(Number(result.rows[0]?.total)).toBe(100);
-          expect(Number(result.rows[0]?.n)).toBe(4);
+          expect(Number(result.rows[0]?.avgActive)).toBe(40);
         },
       );
 
-      it.skipIf(!harness.features.aggregate)(
-        'having filters aggregated rows by measure alias',
+      // ── Top-N-per-group ──────────────────────────────────────────
+      // Same input AggRequest produces the same per-partition slice
+      // on every kit. Mongokit uses `$setWindowFields`; sqlitekit
+      // uses an in-memory post-processor; cross-kit row shape stays
+      // byte-identical. Gated on `aggregateOps.topN` so kits without
+      // a window-function path can opt out cleanly.
+
+      it.skipIf(skipNoTopN)('top-N: keep top 1 per category by count', async () => {
+        if (!ctx.repo.aggregate) return;
+        // Parent fixture: a/b in reader (count 10/20), c/d in admin
+        // (count 30/40). Top 1 per category by count desc → b + d.
+        const result = await ctx.repo.aggregate<{
+          category: string;
+          name: string;
+          n: number;
+        }>({
+          groupBy: ['category', 'name'],
+          measures: { n: { op: 'sum', field: 'count' } },
+          topN: {
+            partitionBy: 'category',
+            sortBy: { n: -1 },
+            limit: 1,
+          },
+          sort: { category: 1 },
+        });
+        expect(result.rows).toEqual([
+          { category: 'admin', name: 'd', n: 40 },
+          { category: 'reader', name: 'b', n: 20 },
+        ]);
+      });
+
+      it.skipIf(skipNoTopN)(
+        'top-N: row_number ties strategy yields exactly N rows per partition',
         async () => {
           if (!ctx.repo.aggregate) return;
-          const result = await ctx.repo.aggregate<{ category: string; total: number }>({
-            groupBy: 'category',
-            measures: { total: { op: 'sum', field: 'count' } },
-            having: gt('total', 50),
+          const result = await ctx.repo.aggregate<{
+            category: string;
+            name: string;
+          }>({
+            groupBy: ['category', 'name'],
+            measures: { n: { op: 'count' } },
+            topN: {
+              partitionBy: 'category',
+              sortBy: { name: 1 },
+              limit: 1,
+              ties: 'row_number',
+            },
+            sort: { category: 1 },
           });
-          expect(result.rows).toHaveLength(1);
-          expect((result.rows[0] as { category: string }).category).toBe('admin');
+          // First name alphabetically per category: reader→a, admin→c.
+          expect(result.rows.map((r) => `${r.category}:${r.name}`)).toEqual([
+            'admin:c',
+            'reader:a',
+          ]);
+        },
+      );
+
+      it.skipIf(skipNoTopN)(
+        'top-N: throws on partitionBy referencing an unknown column',
+        async () => {
+          if (!ctx.repo.aggregate) return;
+          await expect(
+            ctx.repo.aggregate({
+              groupBy: 'category',
+              measures: { n: { op: 'count' } },
+              topN: {
+                partitionBy: 'does-not-exist',
+                sortBy: { n: -1 },
+                limit: 1,
+              },
+            }),
+          ).rejects.toThrow(/topN\.partitionBy "does-not-exist"/);
+        },
+      );
+
+      // ── Percentile measure ───────────────────────────────────────
+      // Asymmetric: mongokit (Mongo 7+) supports it via `$percentile`,
+      // sqlitekit throws by design. Gated on `aggregateOps.percentile`.
+      // This is the first scenario type where cross-kit IR portability
+      // breaks down — pin the kit you target if percentile is a
+      // critical dashboard requirement.
+
+      it.skipIf(skipNoPercentile)(
+        'percentile: P50 / P95 / P99 over a uniform distribution',
+        async () => {
+          if (!ctx.repo.aggregate) return;
+          // Reset and seed 100 evenly-distributed counts (1..100). P50
+          // ≈ 50, P95 ≈ 95, P99 ≈ 99 within the t-digest tolerance.
+          for (let i = 1; i <= 100; i++) {
+            await ctx.repo.create(harness.makeDoc({ name: `p${i}`, category: 'pct', count: i }));
+          }
+          const result = await ctx.repo.aggregate<{
+            p50: number;
+            p95: number;
+            p99: number;
+          }>({
+            filter: eq('category', 'pct'),
+            measures: {
+              p50: { op: 'percentile', field: 'count', p: 0.5 },
+              p95: { op: 'percentile', field: 'count', p: 0.95 },
+              p99: { op: 'percentile', field: 'count', p: 0.99 },
+            },
+          });
+          const row = result.rows[0]!;
+          expect(Number(row.p50)).toBeGreaterThanOrEqual(48);
+          expect(Number(row.p50)).toBeLessThanOrEqual(52);
+          expect(Number(row.p95)).toBeGreaterThanOrEqual(93);
+          expect(Number(row.p95)).toBeLessThanOrEqual(97);
+          expect(Number(row.p99)).toBeGreaterThanOrEqual(97);
+          expect(Number(row.p99)).toBeLessThanOrEqual(100);
+        },
+      );
+
+      it.skipIf(skipNoPercentile)('percentile: rejects p outside [0, 1]', async () => {
+        if (!ctx.repo.aggregate) return;
+        await expect(
+          ctx.repo.aggregate({
+            measures: {
+              bad: { op: 'percentile', field: 'count', p: 1.5 },
+            },
+          }),
+        ).rejects.toThrow(/percentile/);
+      });
+
+      // ── Stddev / stddevPop ───────────────────────────────────────
+      // Asymmetric like percentile — mongokit native, sqlitekit
+      // throws. Gated on `aggregateOps.stddev`.
+
+      it.skipIf(skipNoStddev)(
+        'stddev (sample) matches numpy.std(ddof=1) over [2, 4, 4, 4, 5, 5, 7, 9]',
+        async () => {
+          if (!ctx.repo.aggregate) return;
+          // Wikipedia's classic stddev sample. Result ≈ 2.138.
+          for (const value of [2, 4, 4, 4, 5, 5, 7, 9]) {
+            await ctx.repo.create(
+              harness.makeDoc({ name: `s${value}`, category: 'std', count: value }),
+            );
+          }
+          const result = await ctx.repo.aggregate<{ s: number }>({
+            filter: eq('category', 'std'),
+            measures: { s: { op: 'stddev', field: 'count' } },
+          });
+          expect(Number(result.rows[0]?.s)).toBeCloseTo(2.138, 2);
+        },
+      );
+
+      it.skipIf(skipNoStddev)(
+        'stddevPop (population) matches numpy.std(ddof=0) over the same set',
+        async () => {
+          if (!ctx.repo.aggregate) return;
+          for (const value of [2, 4, 4, 4, 5, 5, 7, 9]) {
+            await ctx.repo.create(
+              harness.makeDoc({ name: `p${value}`, category: 'pop', count: value }),
+            );
+          }
+          const result = await ctx.repo.aggregate<{ s: number }>({
+            filter: eq('category', 'pop'),
+            measures: { s: { op: 'stddevPop', field: 'count' } },
+          });
+          expect(Number(result.rows[0]?.s)).toBeCloseTo(2.0, 6);
+        },
+      );
+
+      // ── Per-request cache ────────────────────────────────────────
+      // Uses `ctx.cachedRepo` (separate from `ctx.repo`) so cache
+      // state is hermetic to this scenario. Harness wires the adapter;
+      // scenarios just exercise the API contract.
+
+      it.skipIf(skipNoCache)(
+        'cache hit: same call within staleTime returns cached value (no DB re-read)',
+        async () => {
+          const cachedRepo = ctx.cachedRepo;
+          if (!cachedRepo || !cachedRepo.aggregate) return;
+          await cachedRepo.create(harness.makeDoc({ name: 'c1', category: 'cache', count: 100 }));
+
+          const first = await cachedRepo.aggregate<{ sum: number }>({
+            filter: eq('category', 'cache'),
+            measures: { sum: { op: 'sum', field: 'count' } },
+            cache: { staleTime: 60 },
+          });
+          expect(Number(first.rows[0]?.sum)).toBe(100);
+
+          // Repeat the same call — cached value served, no DB hit.
+          // (Verified by spying isn't portable across kits, so we
+          //  rely on identical-result assertion under freshness window.)
+          const second = await cachedRepo.aggregate<{ sum: number }>({
+            filter: eq('category', 'cache'),
+            measures: { sum: { op: 'sum', field: 'count' } },
+            cache: { staleTime: 60 },
+          });
+          expect(Number(second.rows[0]?.sum)).toBe(100);
+        },
+      );
+
+      it.skipIf(skipNoCache)(
+        'write invalidates the cache: subsequent read sees the fresh result',
+        async () => {
+          const cachedRepo = ctx.cachedRepo;
+          if (!cachedRepo || !cachedRepo.aggregate) return;
+          await cachedRepo.create(harness.makeDoc({ name: 'wi1', category: 'wi', count: 100 }));
+          const first = await cachedRepo.aggregate<{ sum: number }>({
+            filter: eq('category', 'wi'),
+            measures: { sum: { op: 'sum', field: 'count' } },
+            cache: { staleTime: 60 },
+          });
+          expect(Number(first.rows[0]?.sum)).toBe(100);
+
+          // Write through the repo — cache plugin's `after:create` hook
+          // bumps the model version, orphaning the cached aggregate.
+          await cachedRepo.create(harness.makeDoc({ name: 'wi2', category: 'wi', count: 999 }));
+          const second = await cachedRepo.aggregate<{ sum: number }>({
+            filter: eq('category', 'wi'),
+            measures: { sum: { op: 'sum', field: 'count' } },
+            cache: { staleTime: 60 },
+          });
+          // Auto-invalidation: write between calls busts the cache.
+          expect(Number(second.rows[0]?.sum)).toBe(1099);
+        },
+      );
+
+      it.skipIf(skipNoCache)('bypass: forces fresh fetch + overwrites cached entry', async () => {
+        const cachedRepo = ctx.cachedRepo;
+        if (!cachedRepo || !cachedRepo.aggregate) return;
+        await cachedRepo.create(harness.makeDoc({ name: 'b1', category: 'bp', count: 50 }));
+        await cachedRepo.aggregate({
+          filter: eq('category', 'bp'),
+          measures: { sum: { op: 'sum', field: 'count' } },
+          cache: { staleTime: 60 },
+        });
+        await cachedRepo.create(harness.makeDoc({ name: 'b2', category: 'bp', count: 100 }));
+        const fresh = await cachedRepo.aggregate<{ sum: number }>({
+          filter: eq('category', 'bp'),
+          measures: { sum: { op: 'sum', field: 'count' } },
+          cache: { staleTime: 60, bypass: true },
+        });
+        expect(Number(fresh.rows[0]?.sum)).toBe(150);
+      });
+
+      it.skipIf(skipNoCache)(
+        'tag invalidation via repo.cache.invalidateByTags clears matching entries',
+        async () => {
+          const cachedRepo = ctx.cachedRepo;
+          if (!cachedRepo || !cachedRepo.aggregate) return;
+          await cachedRepo.create(harness.makeDoc({ name: 'i1', category: 'inv', count: 10 }));
+          await cachedRepo.aggregate({
+            filter: eq('category', 'inv'),
+            measures: { sum: { op: 'sum', field: 'count' } },
+            cache: { staleTime: 60, tags: ['inv-tag'] },
+          });
+
+          // Plugin attaches `repo.cache` handle exposing invalidateByTags.
+          const handle = (
+            cachedRepo as unknown as {
+              cache?: { invalidateByTags(tags: readonly string[]): Promise<number> };
+            }
+          ).cache;
+          if (!handle) return; // older kit without the unified plugin
+          const cleared = await handle.invalidateByTags(['inv-tag']);
+          expect(cleared).toBeGreaterThanOrEqual(1);
+        },
+      );
+    });
+
+    // ──────────────────────────────────────────────────────────────────
+    // aggregate — date buckets + keyset pagination
+    //
+    // Lives in its own describe with its own seed because the cross-kit
+    // assertions need varied `createdAt` values (the parent seed leaves
+    // createdAt at the harness default — fine for groupBy by category,
+    // useless for bucketing). New docs use categories the parent doesn't
+    // — so the seeds coexist without needing a deleteMany cleanup that
+    // some kits refuse on an empty filter.
+    // ──────────────────────────────────────────────────────────────────
+
+    describe('aggregate — date buckets + keyset', () => {
+      // Bucket-test categories. Distinct from the parent describe's
+      // `'reader'` / `'admin'` so we can filter to JUST these rows.
+      const BUCKET_CATS = ['bk-paid', 'bk-pending'] as const;
+
+      // Keyset-test categories. Five values so the tests can walk
+      // multiple pages.
+      const KEYSET_CATS = ['ks-a', 'ks-b', 'ks-c', 'ks-d', 'ks-e'] as const;
+
+      beforeEach(async () => {
+        // Bucket fixture: 5 paid docs spread across Jan/Feb/Apr/Jul +
+        // 1 pending in Feb. Identical timestamps + counts cross-kit.
+        await ctx.repo.createMany!([
+          harness.makeDoc({
+            name: 'bk1',
+            category: 'bk-paid',
+            count: 100,
+            createdAt: '2026-01-15T10:00:00Z',
+          }),
+          harness.makeDoc({
+            name: 'bk2',
+            category: 'bk-paid',
+            count: 200,
+            createdAt: '2026-01-22T10:00:00Z',
+          }),
+          harness.makeDoc({
+            name: 'bk3',
+            category: 'bk-paid',
+            count: 300,
+            createdAt: '2026-02-05T10:00:00Z',
+          }),
+          harness.makeDoc({
+            name: 'bk4',
+            category: 'bk-pending',
+            count: 50,
+            createdAt: '2026-02-05T10:00:00Z',
+          }),
+          harness.makeDoc({
+            name: 'bk5',
+            category: 'bk-paid',
+            count: 400,
+            createdAt: '2026-04-10T10:00:00Z',
+          }),
+          harness.makeDoc({
+            name: 'bk6',
+            category: 'bk-paid',
+            count: 500,
+            createdAt: '2026-07-20T10:00:00Z',
+          }),
+        ]);
+        // Keyset fixture: 5 distinct categories, one doc each. Counts
+        // are 10/11/30/40/50 so sum-by-category sort is well-defined.
+        for (let i = 0; i < KEYSET_CATS.length; i++) {
+          const cat = KEYSET_CATS[i] as string;
+          await ctx.repo.create(harness.makeDoc({ name: cat, category: cat, count: 10 + i * 10 }));
+        }
+      });
+
+      // ── Date buckets ─────────────────────────────────────────────
+      // Same AggRequest → same bucketed rows on every kit. Bucket
+      // labels are canonical ISO-shaped: `YYYY-MM` / `YYYY-MM-DD` /
+      // `YYYY-Qn` / `YYYY` — byte-stable across backends so dashboards
+      // render identically.
+
+      it.skipIf(skipNoAgg)('date bucket month groups rows under YYYY-MM labels', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{ month: string; revenue: number }>({
+          filter: { category: 'bk-paid' },
+          dateBuckets: { month: { field: 'createdAt', interval: 'month' } },
+          measures: { revenue: { op: 'sum', field: 'count' } },
+          sort: { month: 1 },
+        });
+        expect(result.rows).toEqual([
+          { month: '2026-01', revenue: 300 },
+          { month: '2026-02', revenue: 300 },
+          { month: '2026-04', revenue: 400 },
+          { month: '2026-07', revenue: 500 },
+        ]);
+      });
+
+      it.skipIf(skipNoAgg)('date bucket day emits YYYY-MM-DD', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{ day: string; n: number }>({
+          filter: { category: 'bk-paid' },
+          dateBuckets: { day: { field: 'createdAt', interval: 'day' } },
+          measures: { n: { op: 'count' } },
+          sort: { day: 1 },
+        });
+        expect(result.rows.map((r) => (r as { day: string }).day)).toEqual([
+          '2026-01-15',
+          '2026-01-22',
+          '2026-02-05',
+          '2026-04-10',
+          '2026-07-20',
+        ]);
+      });
+
+      it.skipIf(skipNoAgg)('date bucket quarter emits YYYY-Qn', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{ q: string; n: number }>({
+          filter: { category: 'bk-paid' },
+          dateBuckets: { q: { field: 'createdAt', interval: 'quarter' } },
+          measures: { n: { op: 'count' } },
+          sort: { q: 1 },
+        });
+        // Q1: Jan/Feb (3 docs); Q2: Apr (1 doc); Q3: Jul (1 doc).
+        expect(result.rows).toEqual([
+          { q: '2026-Q1', n: 3 },
+          { q: '2026-Q2', n: 1 },
+          { q: '2026-Q3', n: 1 },
+        ]);
+      });
+
+      it.skipIf(skipNoAgg)('date bucket year emits YYYY', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{ year: string; n: number }>({
+          filter: { category: 'bk-paid' },
+          dateBuckets: { year: { field: 'createdAt', interval: 'year' } },
+          measures: { n: { op: 'count' } },
+        });
+        expect(result.rows).toEqual([{ year: '2026', n: 5 }]);
+      });
+
+      // ── Custom-bin intervals ────────────────────────────────────
+      // `{ every: N, unit }` form for arbitrary intervals like
+      // 15-minute or 6-hour bins. Both kits emit identical labels
+      // for the same input so cross-kit dashboards stay byte-stable.
+
+      it.skipIf(skipNoCustomBuckets)('custom 15-minute bins', async () => {
+        if (!ctx.repo.aggregate) return;
+        // Seed 5 docs in JAN where we control timestamps tightly.
+        // Categories tagged `bk2-*` so they don't collide with
+        // existing bucket fixtures from the parent beforeEach.
+        await ctx.repo.createMany!([
+          harness.makeDoc({
+            name: 'q1',
+            category: 'bk2',
+            count: 1,
+            createdAt: '2026-04-15T10:00:00Z',
+          }),
+          harness.makeDoc({
+            name: 'q2',
+            category: 'bk2',
+            count: 1,
+            createdAt: '2026-04-15T10:14:00Z',
+          }),
+          harness.makeDoc({
+            name: 'q3',
+            category: 'bk2',
+            count: 1,
+            createdAt: '2026-04-15T10:15:00Z',
+          }),
+          harness.makeDoc({
+            name: 'q4',
+            category: 'bk2',
+            count: 1,
+            createdAt: '2026-04-15T10:29:00Z',
+          }),
+          harness.makeDoc({
+            name: 'q5',
+            category: 'bk2',
+            count: 1,
+            createdAt: '2026-04-15T10:30:00Z',
+          }),
+        ]);
+        const result = await ctx.repo.aggregate<{ bin: string; n: number }>({
+          filter: eq('category', 'bk2'),
+          dateBuckets: {
+            bin: { field: 'createdAt', interval: { every: 15, unit: 'minute' } },
+          },
+          measures: { n: { op: 'count' } },
+          sort: { bin: 1 },
+        });
+        expect(result.rows).toEqual([
+          { bin: '2026-04-15T10:00', n: 2 },
+          { bin: '2026-04-15T10:15', n: 2 },
+          { bin: '2026-04-15T10:30', n: 1 },
+        ]);
+      });
+
+      it.skipIf(skipNoSubMinuteBuckets)('named hour bucket emits YYYY-MM-DDTHH:00', async () => {
+        if (!ctx.repo.aggregate) return;
+        await ctx.repo.createMany!([
+          harness.makeDoc({
+            name: 'h1',
+            category: 'bk3',
+            count: 1,
+            createdAt: '2026-04-15T10:15:00Z',
+          }),
+          harness.makeDoc({
+            name: 'h2',
+            category: 'bk3',
+            count: 1,
+            createdAt: '2026-04-15T10:45:00Z',
+          }),
+          harness.makeDoc({
+            name: 'h3',
+            category: 'bk3',
+            count: 1,
+            createdAt: '2026-04-15T11:05:00Z',
+          }),
+        ]);
+        const result = await ctx.repo.aggregate<{ hour: string; n: number }>({
+          filter: eq('category', 'bk3'),
+          dateBuckets: { hour: { field: 'createdAt', interval: 'hour' } },
+          measures: { n: { op: 'count' } },
+          sort: { hour: 1 },
+        });
+        expect(result.rows).toEqual([
+          { hour: '2026-04-15T10:00', n: 2 },
+          { hour: '2026-04-15T11:00', n: 1 },
+        ]);
+      });
+
+      it.skipIf(skipNoAgg)('date bucket combines with groupBy column', async () => {
+        if (!ctx.repo.aggregate) return;
+        const result = await ctx.repo.aggregate<{
+          month: string;
+          category: string;
+          n: number;
+        }>({
+          filter: in_('category', [...BUCKET_CATS]),
+          dateBuckets: { month: { field: 'createdAt', interval: 'month' } },
+          groupBy: 'category',
+          measures: { n: { op: 'count' } },
+          sort: { month: 1, category: 1 },
+        });
+        expect(result.rows).toEqual([
+          { month: '2026-01', category: 'bk-paid', n: 2 },
+          { month: '2026-02', category: 'bk-paid', n: 1 },
+          { month: '2026-02', category: 'bk-pending', n: 1 },
+          { month: '2026-04', category: 'bk-paid', n: 1 },
+          { month: '2026-07', category: 'bk-paid', n: 1 },
+        ]);
+      });
+
+      // ── Keyset pagination ────────────────────────────────────────
+      // Cursor format is opaque + kit-specific (cross-kit byte
+      // stability NOT promised), but the page-walking contract is
+      // universal: chaining `next` → `after` walks the full result
+      // set with no overlaps and no gaps.
+
+      it.skipIf(skipNoAgg)('aggregatePaginate keyset walks all groups via cursor', async () => {
+        if (!ctx.repo.aggregatePaginate) return;
+        type Row = { category: string; n: number };
+        type PaginateResult = OffsetPaginationResult<Row> | KeysetAggPaginationResult<Row>;
+        const seen: string[] = [];
+        let cursor: string | null = null;
+        // Bind through a non-optional alias so TS sees a concrete
+        // signature (the contract types `aggregatePaginate?` as
+        // optional, which loses the union return when read inline).
+        // `.bind(repo)` preserves `this` — kits implement the method
+        // on their Repository class and rely on `this._buildContext`.
+        const aggregatePaginate = ctx.repo.aggregatePaginate.bind(ctx.repo) as NonNullable<
+          typeof ctx.repo.aggregatePaginate
+        >;
+
+        for (let i = 0; i < 10; i++) {
+          const result: PaginateResult = await aggregatePaginate<Row>({
+            filter: in_('category', [...KEYSET_CATS]),
+            groupBy: 'category',
+            measures: { n: { op: 'count' } },
+            sort: { category: 1 },
+            pagination: 'keyset',
+            limit: 2,
+            ...(cursor ? { after: cursor } : {}),
+          });
+          expect(result.method).toBe('keyset');
+          if (result.method !== 'keyset') throw new Error('expected keyset envelope');
+          for (const row of result.data) seen.push(row.category);
+          cursor = result.next;
+          if (!result.hasMore) break;
+        }
+        expect(seen).toEqual([...KEYSET_CATS]);
+      });
+
+      it.skipIf(skipNoAgg)(
+        'aggregatePaginate keyset hasMore is false on the final page',
+        async () => {
+          if (!ctx.repo.aggregatePaginate) return;
+          type Row = { category: string; n: number };
+          // Bind through a non-optional alias so TS sees a concrete
+          // signature (the contract types `aggregatePaginate?` as
+          // optional, which loses the union return when read inline).
+          // `.bind(repo)` preserves `this` — kits implement the method
+          // on their Repository class and rely on `this._buildContext`.
+          const aggregatePaginate = ctx.repo.aggregatePaginate.bind(ctx.repo) as NonNullable<
+            typeof ctx.repo.aggregatePaginate
+          >;
+
+          type PaginateResult = OffsetPaginationResult<Row> | KeysetAggPaginationResult<Row>;
+          const result: PaginateResult = await aggregatePaginate<Row>({
+            filter: in_('category', [...KEYSET_CATS]),
+            groupBy: 'category',
+            measures: { n: { op: 'count' } },
+            sort: { category: 1 },
+            pagination: 'keyset',
+            limit: 100, // larger than result set
+          });
+          expect(result.method).toBe('keyset');
+          if (result.method !== 'keyset') throw new Error('expected keyset envelope');
+          expect(result.data).toHaveLength(KEYSET_CATS.length);
+          expect(result.hasMore).toBe(false);
+          expect(result.next).toBeNull();
         },
       );
     });
@@ -382,10 +1044,10 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
           page: 99,
           limit: 10,
           sort: 'createdAt',
-        })) as { docs?: unknown[]; total?: number };
-        // Offset envelope — every kit returns { docs, total, ... }
-        expect(Array.isArray(out.docs)).toBe(true);
-        expect(out.docs).toHaveLength(0);
+        })) as { data?: unknown[]; total?: number };
+        // Offset envelope — every kit returns { data, total, ... }
+        expect(Array.isArray(out.data)).toBe(true);
+        expect(out.data).toHaveLength(0);
         expect(out.total).toBe(5);
       });
 
@@ -394,8 +1056,8 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
           page: 1,
           limit: 1000,
           sort: 'createdAt',
-        })) as { docs: unknown[]; total: number };
-        expect(out.docs).toHaveLength(5);
+        })) as { data: unknown[]; total: number };
+        expect(out.data).toHaveLength(5);
         expect(out.total).toBe(5);
       });
 
@@ -404,8 +1066,8 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
           filters: { count: 3 } as Partial<TDoc> & Record<string, unknown>,
           page: 1,
           limit: 10,
-        })) as { docs: unknown[]; total: number };
-        expect(out.docs).toHaveLength(1);
+        })) as { data: unknown[]; total: number };
+        expect(out.data).toHaveLength(1);
         expect(out.total).toBe(1);
       });
     });
@@ -503,25 +1165,27 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
     // ──────────────────────────────────────────────────────────────────
 
     describe.skipIf(!harness.features.getOrCreate)('getOrCreate', () => {
-      it('inserts when no row matches filter', async () => {
+      it('inserts when no row matches filter (created: true)', async () => {
         if (!ctx.repo.getOrCreate) return;
         const result = await ctx.repo.getOrCreate(
           { email: 'fresh@x.com' },
           harness.makeDoc({ name: 'Fresh', email: 'fresh@x.com' }),
         );
-        expect(result?.name).toBe('Fresh');
+        expect((result.doc as { name: string }).name).toBe('Fresh');
+        expect(result.created).toBe(true);
         const all = await ctx.repo.findAll!();
         expect(all).toHaveLength(1);
       });
 
-      it('returns existing row when filter matches (no insert)', async () => {
+      it('returns existing row when filter matches (created: false, no insert)', async () => {
         if (!ctx.repo.getOrCreate) return;
         await ctx.repo.create(harness.makeDoc({ name: 'Existing', email: 'existing@x.com' }));
         const result = await ctx.repo.getOrCreate(
           { email: 'existing@x.com' },
           harness.makeDoc({ name: 'WouldOverwrite', email: 'existing@x.com' }),
         );
-        expect(result?.name).toBe('Existing');
+        expect((result.doc as { name: string }).name).toBe('Existing');
+        expect(result.created).toBe(false);
         const all = await ctx.repo.findAll!();
         expect(all).toHaveLength(1);
       });

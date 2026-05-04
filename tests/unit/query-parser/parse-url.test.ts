@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Filter } from '../../../src/filter/index.js';
-import { parseUrl } from '../../../src/query-parser/index.js';
+import {
+  isControlParam,
+  parseUrl,
+  STANDARD_RESERVED_PARAMS,
+} from '../../../src/query-parser/index.js';
 
 /** Helper — parseUrl from an object (the arc/fluid frontends hand this shape in). */
 function parse(obj: Record<string, string | string[]>, options?: Parameters<typeof parseUrl>[1]) {
@@ -163,6 +167,63 @@ describe('parseUrl — populate grammar', () => {
       'populate[author][match][active]': 'true',
     });
     expect(populate).toEqual([{ path: 'author', select: 'name email', match: { active: 'true' } }]);
+  });
+});
+
+describe('parseUrl — reserved control params', () => {
+  it('STANDARD_RESERVED_PARAMS holds pagination + dispatch verbs', () => {
+    // Pagination + list control
+    expect(STANDARD_RESERVED_PARAMS.has('page')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('limit')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('after')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('sort')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('select')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('populate')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('search')).toBe(true);
+    // Dispatch verbs
+    expect(STANDARD_RESERVED_PARAMS.has('_count')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('_distinct')).toBe(true);
+    expect(STANDARD_RESERVED_PARAMS.has('_exists')).toBe(true);
+    // Not reserved
+    expect(STANDARD_RESERVED_PARAMS.has('status')).toBe(false);
+    expect(STANDARD_RESERVED_PARAMS.has('_id')).toBe(false);
+  });
+
+  it('isControlParam matches the explicit allowlist only', () => {
+    expect(isControlParam('page')).toBe(true);
+    expect(isControlParam('search')).toBe(true);
+    expect(isControlParam('_count')).toBe(true);
+    expect(isControlParam('_distinct')).toBe(true);
+    expect(isControlParam('_exists')).toBe(true);
+    // Real filter fields — must NOT be treated as control params
+    expect(isControlParam('status')).toBe(false);
+    expect(isControlParam('_id')).toBe(false);
+    expect(isControlParam('_v')).toBe(false);
+    expect(isControlParam('_internal')).toBe(false);
+    expect(isControlParam('_anything')).toBe(false);
+    expect(isControlParam('')).toBe(false);
+  });
+
+  it('dispatch verbs never become filter predicates', () => {
+    // `_count=true` + a real filter — only the real filter compiles.
+    const result = parse({ _count: 'true', status: 'active' });
+    expect(result.filter).toEqual({
+      op: 'eq',
+      field: 'status',
+      value: 'active',
+    } satisfies Filter);
+  });
+
+  it('preserves _id and other underscore-prefixed filter fields', () => {
+    // Regression guard: a blanket `_*` rule would silently drop
+    // these — Mongo's `_id` and any user-defined `_meta` field must
+    // flow into the filter as eq predicates.
+    const result = parse({ _id: '550e8400-e29b-41d4-a716-446655440000' });
+    expect(result.filter).toEqual({
+      op: 'eq',
+      field: '_id',
+      value: '550e8400-e29b-41d4-a716-446655440000',
+    } satisfies Filter);
   });
 });
 

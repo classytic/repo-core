@@ -1,26 +1,24 @@
 /**
  * `toCanonicalList()` is the single point where a repository result becomes
- * an HTTP wire envelope. These tests pin:
+ * an HTTP wire shape. These tests pin:
  *
- *   1. Bare arrays → `BareListResponse` (no `method` field).
- *   2. Paginated results → matching `*Response` shape with `success: true`
- *      and the `method` discriminant preserved.
+ *   1. Bare arrays → `BareListResult` (`{data}` wrapper, no `method` field).
+ *   2. Paginated results → matching shape with the `method` discriminant
+ *      preserved (data shape and wire shape are structurally identical —
+ *      HTTP status discriminates success vs error).
  *   3. `TExtra` fields (mongokit's `warning?: string`, etc.) flow through.
  *   4. The `isPaginatedResult` guard branches on `method`, not array-ness,
  *      so an empty paginated result still routes correctly.
- *   5. The `success` literal is `true` (not widened to `boolean`) — locks
- *      the discriminated-union contract for typed clients.
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { isPaginatedResult, toCanonicalList } from '../../../src/pagination/canonical.js';
 import type {
   AggregatePaginationResult,
-  BareListResponse,
+  BareListResult,
   KeysetPaginationResult,
-  OffsetPaginationResponse,
   OffsetPaginationResult,
-  PaginatedResponse,
+  PaginatedResult,
 } from '../../../src/pagination/types.js';
 
 interface User {
@@ -34,7 +32,7 @@ describe('isPaginatedResult', () => {
   it('returns true for offset results', () => {
     const r: OffsetPaginationResult<User> = {
       method: 'offset',
-      docs: [u1],
+      data: [u1],
       page: 1,
       limit: 20,
       total: 1,
@@ -48,7 +46,7 @@ describe('isPaginatedResult', () => {
   it('returns true for keyset results', () => {
     const r: KeysetPaginationResult<User> = {
       method: 'keyset',
-      docs: [u1],
+      data: [u1],
       limit: 20,
       hasMore: false,
       next: null,
@@ -59,7 +57,7 @@ describe('isPaginatedResult', () => {
   it('returns true for aggregate results', () => {
     const r: AggregatePaginationResult<User> = {
       method: 'aggregate',
-      docs: [u1],
+      data: [u1],
       page: 1,
       limit: 20,
       total: 1,
@@ -76,8 +74,8 @@ describe('isPaginatedResult', () => {
   });
 
   it('returns false for objects without a method discriminant', () => {
-    expect(isPaginatedResult({ docs: [u1] } as never)).toBe(false);
-    expect(isPaginatedResult({ method: 'something-else', docs: [] } as never)).toBe(false);
+    expect(isPaginatedResult({ data: [u1] } as never)).toBe(false);
+    expect(isPaginatedResult({ method: 'something-else', data: [] } as never)).toBe(false);
   });
 
   it('returns false for null / non-object inputs', () => {
@@ -95,15 +93,15 @@ describe('isPaginatedResult', () => {
 });
 
 describe('toCanonicalList — bare arrays', () => {
-  it('wraps a non-empty array as BareListResponse', () => {
+  it('wraps a non-empty array as BareListResult', () => {
     const out = toCanonicalList([u1, u2]);
-    expect(out).toEqual({ success: true, docs: [u1, u2] });
+    expect(out).toEqual({ data: [u1, u2] });
     expect('method' in out).toBe(false);
   });
 
   it('wraps an empty array', () => {
     const out = toCanonicalList<User>([]);
-    expect(out).toEqual({ success: true, docs: [] });
+    expect(out).toEqual({ data: [] });
   });
 
   it('does not mutate the input array', () => {
@@ -116,15 +114,15 @@ describe('toCanonicalList — bare arrays', () => {
   it('produces a fresh docs array (no aliasing)', () => {
     const input = [u1];
     const out = toCanonicalList(input);
-    expect(out.docs).not.toBe(input);
+    expect(out.data).not.toBe(input);
   });
 });
 
 describe('toCanonicalList — paginated results', () => {
-  it('preserves offset shape and stamps success: true', () => {
+  it('preserves offset shape', () => {
     const r: OffsetPaginationResult<User> = {
       method: 'offset',
-      docs: [u1],
+      data: [u1],
       page: 1,
       limit: 20,
       total: 1,
@@ -134,9 +132,8 @@ describe('toCanonicalList — paginated results', () => {
     };
     const out = toCanonicalList(r);
     expect(out).toMatchObject({
-      success: true,
       method: 'offset',
-      docs: [u1],
+      data: [u1],
       page: 1,
       limit: 20,
       total: 1,
@@ -149,16 +146,15 @@ describe('toCanonicalList — paginated results', () => {
   it('preserves keyset shape', () => {
     const r: KeysetPaginationResult<User> = {
       method: 'keyset',
-      docs: [u1],
+      data: [u1],
       limit: 20,
       hasMore: true,
       next: 'cursor-abc',
     };
     const out = toCanonicalList(r);
     expect(out).toMatchObject({
-      success: true,
       method: 'keyset',
-      docs: [u1],
+      data: [u1],
       limit: 20,
       hasMore: true,
       next: 'cursor-abc',
@@ -168,7 +164,7 @@ describe('toCanonicalList — paginated results', () => {
   it('preserves aggregate shape', () => {
     const r: AggregatePaginationResult<User> = {
       method: 'aggregate',
-      docs: [u1, u2],
+      data: [u1, u2],
       page: 1,
       limit: 20,
       total: 2,
@@ -178,14 +174,14 @@ describe('toCanonicalList — paginated results', () => {
     };
     const out = toCanonicalList(r);
     expect(out.method).toBe('aggregate');
-    expect(out.docs).toHaveLength(2);
+    expect(out.data).toHaveLength(2);
   });
 
   it('flows TExtra fields through (mongokit warning case)', () => {
     type WithWarning = OffsetPaginationResult<User, { warning?: string }>;
     const r: WithWarning = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 100,
       limit: 20,
       total: 2000,
@@ -199,10 +195,10 @@ describe('toCanonicalList — paginated results', () => {
     expect((out as { warning?: string }).warning).toContain('Deep pagination');
   });
 
-  it('does not lose method when paginated.docs is empty', () => {
+  it('does not lose method when paginated.data is empty', () => {
     const r: OffsetPaginationResult<User> = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -212,40 +208,20 @@ describe('toCanonicalList — paginated results', () => {
     };
     const out = toCanonicalList(r);
     expect(out.method).toBe('offset');
-    expect(out.docs).toEqual([]);
-  });
-
-  it('does not let an external success: false on the input override success: true', () => {
-    // Defensive: if a kit ever produced a result envelope with a stale
-    // `success` field, the wire envelope must still emit `success: true`
-    // (paginated success path). Order of spread matters; this test pins it.
-    const dirty = {
-      method: 'offset',
-      docs: [u1],
-      page: 1,
-      limit: 20,
-      total: 1,
-      pages: 1,
-      hasNext: false,
-      hasPrev: false,
-      // biome-ignore lint/suspicious/noExplicitAny: deliberate stale-field test
-    } as any;
-    dirty.success = false;
-    const out = toCanonicalList(dirty);
-    expect(out.success).toBe(true);
+    expect(out.data).toEqual([]);
   });
 });
 
 describe('type-level contracts', () => {
-  it('bare array overload returns BareListResponse<T>', () => {
+  it('bare array overload returns BareListResult<T>', () => {
     const out = toCanonicalList([u1]);
-    expectTypeOf(out).toMatchTypeOf<BareListResponse<User>>();
+    expectTypeOf(out).toMatchTypeOf<BareListResult<User>>();
   });
 
-  it('paginated overload returns PaginatedResponse<T>', () => {
+  it('paginated overload returns PaginatedResult<T>', () => {
     const r: OffsetPaginationResult<User> = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -254,18 +230,17 @@ describe('type-level contracts', () => {
       hasPrev: false,
     };
     const out = toCanonicalList(r);
-    // Returned shape is assignable to OffsetPaginationResponse — narrows
+    // Returned shape is assignable to OffsetPaginationResult — narrows
     // via the `method` discriminant on the union.
-    if (out.success && 'method' in out && out.method === 'offset') {
-      expectTypeOf(out).toMatchTypeOf<OffsetPaginationResponse<User>>();
+    if ('method' in out && out.method === 'offset') {
+      expectTypeOf(out).toMatchTypeOf<OffsetPaginationResult<User>>();
     }
   });
 
-  it('PaginatedResponse union narrows via success + method', () => {
-    const wire: PaginatedResponse<User> = {
-      success: true,
+  it('PaginatedResult union narrows via method', () => {
+    const wire: PaginatedResult<User> = {
       method: 'offset',
-      docs: [u1],
+      data: [u1],
       page: 1,
       limit: 20,
       total: 1,
@@ -273,7 +248,7 @@ describe('type-level contracts', () => {
       hasNext: false,
       hasPrev: false,
     };
-    if (wire.success && 'method' in wire && wire.method === 'offset') {
+    if ('method' in wire && wire.method === 'offset') {
       // Narrowed — `page` is visible without a cast.
       expect(wire.page).toBe(1);
     }

@@ -19,6 +19,21 @@ export default defineConfig({
       {
         extends: true,
         test: {
+          // Vitest bench mode — run with `npm run bench`. The bench
+          // files live under `tests/bench/` and are excluded from every
+          // other project's includes so `vitest run` skips them.
+          name: 'bench',
+          include: ['tests/bench/**/*.bench.ts'],
+          benchmark: {
+            include: ['tests/bench/**/*.bench.ts'],
+          },
+          testTimeout: 60_000,
+          hookTimeout: 30_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
           name: 'integration',
           include: ['tests/integration/**/*.test.ts'],
           testTimeout: 30_000,

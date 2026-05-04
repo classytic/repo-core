@@ -147,14 +147,31 @@ export function validateCursorVersion(
 function isValidPayload(payload: unknown): payload is CursorPayload {
   if (!payload || typeof payload !== 'object') return false;
   const p = payload as Record<string, unknown>;
+  // Defensive: validate every field's TYPE, not just presence. A hostile
+  // / corrupted cursor that supplies `{ v: { evil: true } }` would have
+  // bypassed the prior `'v' in p` shape check, slipping through to
+  // `rehydrateValue` and emitting an opaque error or worse. `v` is the
+  // serialized form of `serializeValue(...)` — any of the legal scalar
+  // shapes that fn produces.
   return (
-    'v' in p &&
+    isSerializedScalar(p['v']) &&
     typeof p['t'] === 'string' &&
     typeof p['id'] === 'string' &&
     typeof p['idType'] === 'string' &&
     typeof p['sort'] === 'object' &&
     p['sort'] !== null &&
-    typeof p['ver'] === 'number'
+    !Array.isArray(p['sort']) &&
+    typeof p['ver'] === 'number' &&
+    Number.isFinite(p['ver'])
+  );
+}
+
+function isSerializedScalar(v: unknown): v is string | number | boolean | null {
+  return (
+    v === null ||
+    typeof v === 'string' ||
+    (typeof v === 'number' && Number.isFinite(v)) ||
+    typeof v === 'boolean'
   );
 }
 

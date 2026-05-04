@@ -6,19 +6,20 @@
  *   - {@link OffsetPaginationResult} / {@link KeysetPaginationResult} /
  *     {@link AggregatePaginationResult} — anything a `RepositoryLike` returns
  *
- * and emits the matching {@link PaginatedResponse} wire envelope (with
- * `success: true` stamped on). The `method` discriminant on paginated
- * results carries straight through; bare arrays produce a
- * {@link BareListResponse}.
+ * and emits the matching {@link PaginatedResult} wire shape. The `method`
+ * discriminant on paginated results carries straight through; bare arrays
+ * produce a {@link BareListResult} (`{data: T[]}`).
  *
  * This is the single point where the *internal* repo result becomes the
- * *external* HTTP envelope. Servers (arc) call it once before flushing;
- * SDK clients (arc-next) consume the matching `PaginatedResponse` type.
+ * *external* HTTP wire shape. Servers (arc) call it once before flushing;
+ * SDK clients (arc-next) consume the matching `PaginatedResult` type.
+ * Discriminate on `'method' in response` — HTTP status discriminates
+ * success vs error.
  *
  * Why a runtime function and not "just spread":
- *   - The bare-array branch needs a wrapper.
- *   - Paginated results need `success: true` stamped without losing the
- *     `method` discriminant or `TExtra` fields.
+ *   - The bare-array branch needs a `{data}` wrapper for consistency.
+ *   - Paginated results need a normalized return shape so consumers can
+ *     consume one canonical type instead of N kit-specific shapes.
  *   - One function = one place where the wire shape is materialised, so
  *     regressions can't sneak in via per-route hand-rolled wrappers.
  *
@@ -32,14 +33,14 @@
  *
  * @example Client typing
  * ```ts
- * import type { PaginatedResponse } from '@classytic/repo-core/pagination';
+ * import type { PaginatedResult } from '@classytic/repo-core/pagination';
  *
- * const res = await fetch('/users').then(r => r.json()) as PaginatedResponse<User>;
- * if (res.method === 'offset') { ...res.page... }
+ * const res = await fetch('/users').then(r => r.json()) as PaginatedResult<User>;
+ * if ('method' in res && res.method === 'offset') { ...res.page... }
  * ```
  */
 
-import type { AnyPaginationResult, BareListResponse, PaginatedResponse } from './types.js';
+import type { AnyPaginationResult, BareListResult, PaginatedResult } from './types.js';
 
 /**
  * Type guard: is this value a paginated result envelope (vs a bare array
@@ -51,7 +52,7 @@ import type { AnyPaginationResult, BareListResponse, PaginatedResponse } from '.
  *
  * Accepts `unknown` (rather than `T[] | AnyPaginationResult<T>`) so wire-
  * boundary callers can guard arbitrary inputs without pre-narrowing — the
- * arc / arc-next response pipeline routinely sees `{ docs: unknown[] }`
+ * arc / arc-next response pipeline routinely sees `{ data: unknown[] }`
  * shapes that are neither a bare array nor a paginated result, and forcing
  * those callers to cast first defeats the guard's purpose.
  */
@@ -67,32 +68,31 @@ export function isPaginatedResult<TDoc>(input: unknown): input is AnyPaginationR
  * Normalise a list-shaped value into the canonical wire envelope.
  *
  * Overloads keep the return type tight:
- *   - bare array  → {@link BareListResponse}
- *   - paginated   → {@link PaginatedResponse} (preserves method discriminant)
+ *   - bare array  → {@link BareListResult}
+ *   - paginated   → {@link PaginatedResult} (preserves method discriminant)
  *
  * The mutable-array overload widens to `TDoc[]` because that's the most
  * common server input (kit results return `TDoc[]` for `docs`); the
  * readonly overload covers callers passing `readonly TDoc[]`.
  */
-export function toCanonicalList<TDoc>(input: TDoc[]): BareListResponse<TDoc>;
-export function toCanonicalList<TDoc>(input: readonly TDoc[]): BareListResponse<TDoc>;
+export function toCanonicalList<TDoc>(input: TDoc[]): BareListResult<TDoc>;
+export function toCanonicalList<TDoc>(input: readonly TDoc[]): BareListResult<TDoc>;
 export function toCanonicalList<TDoc, TExtra extends Record<string, unknown>>(
   input: AnyPaginationResult<TDoc, TExtra>,
-): PaginatedResponse<TDoc, TExtra>;
+): PaginatedResult<TDoc, TExtra>;
 export function toCanonicalList<TDoc>(
   input: readonly TDoc[] | AnyPaginationResult<TDoc>,
-): PaginatedResponse<TDoc>;
+): PaginatedResult<TDoc>;
 export function toCanonicalList<TDoc>(
   input: readonly TDoc[] | AnyPaginationResult<TDoc>,
-): PaginatedResponse<TDoc> {
+): PaginatedResult<TDoc> {
   if (isPaginatedResult(input)) {
-    // `success: true` goes AFTER the spread so a stale `success: false`
-    // accidentally present on the input cannot override the literal —
-    // the canonical wire contract for the paginated success path is
-    // `success: true` regardless of what's on the result object. Tested.
-    return { ...input, success: true };
+    // Paginated result → wire shape is structurally identical. Spread
+    // produces a fresh object so callers can safely mutate without
+    // affecting the source.
+    return { ...input };
   }
-  // Bare array → BareListResponse. Cast to mutable for the wire shape;
+  // Bare array → BareListResult. Cast to mutable for the wire shape;
   // consumers shouldn't mutate the response anyway.
-  return { success: true, docs: [...input] };
+  return { data: [...input] };
 }

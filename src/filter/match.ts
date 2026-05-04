@@ -66,12 +66,12 @@ export function matchFilter(doc: unknown, filter: Filter): boolean {
       const v = getField(doc, filter.field);
       if (typeof v !== 'string') return false;
       const flags = filter.caseSensitivity === 'sensitive' ? '' : 'i';
-      return new RegExp(`^${likeToRegex(filter.pattern)}$`, flags).test(v);
+      return getOrCompileLike(filter.pattern, flags).test(v);
     }
     case 'regex': {
       const v = getField(doc, filter.field);
       if (typeof v !== 'string') return false;
-      return new RegExp(filter.pattern, filter.flags).test(v);
+      return getOrCompileRegex(filter.pattern, filter.flags).test(v);
     }
     case 'raw':
       // `raw` embeds a driver-native fragment we can't evaluate in JS.
@@ -127,6 +127,45 @@ function toComparable(value: unknown): number | string | undefined {
   if (typeof value === 'number' || typeof value === 'string') return value;
   if (typeof value === 'boolean') return value ? 1 : 0;
   return undefined;
+}
+
+/**
+ * Compiled-RegExp caches keyed by `pattern|flags`. Without these, a
+ * filter run via `asPredicate(filter)` over an N-doc array compiles a
+ * fresh `new RegExp(...)` on every doc — at 100k docs and a non-trivial
+ * pattern, that's measurable. Bounded LRU eviction keeps the cache
+ * from growing unboundedly when callers hand us thousands of distinct
+ * patterns (e.g. "name LIKE %" personalization at scale).
+ */
+const REGEX_CACHE_LIMIT = 256;
+const likeCache = new Map<string, RegExp>();
+const regexCache = new Map<string, RegExp>();
+
+function getOrCompileLike(pattern: string, flags: string): RegExp {
+  const key = `${flags}|${pattern}`;
+  let re = likeCache.get(key);
+  if (re) return re;
+  re = new RegExp(`^${likeToRegex(pattern)}$`, flags);
+  if (likeCache.size >= REGEX_CACHE_LIMIT) {
+    const oldest = likeCache.keys().next().value;
+    if (oldest !== undefined) likeCache.delete(oldest);
+  }
+  likeCache.set(key, re);
+  return re;
+}
+
+function getOrCompileRegex(pattern: string, flags: string | undefined): RegExp {
+  const f = flags ?? '';
+  const key = `${f}|${pattern}`;
+  let re = regexCache.get(key);
+  if (re) return re;
+  re = new RegExp(pattern, f);
+  if (regexCache.size >= REGEX_CACHE_LIMIT) {
+    const oldest = regexCache.keys().next().value;
+    if (oldest !== undefined) regexCache.delete(oldest);
+  }
+  regexCache.set(key, re);
+  return re;
 }
 
 /** SQL `LIKE` pattern → JS regex body. Escapes regex metachars; `%` → `.*`, `_` → `.`. */

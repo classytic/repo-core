@@ -19,6 +19,9 @@ export default defineConfig({
     'lookup/index': 'src/lookup/index.ts',
     'tenant/index': 'src/tenant/index.ts',
     'adapter/index': 'src/adapter/index.ts',
+    'better-auth/index': 'src/better-auth/index.ts',
+    'aggregate/index': 'src/aggregate/index.ts',
+    'plugins/index': 'src/plugins/index.ts',
   },
   outputOptions: {
     preserveModules: true,

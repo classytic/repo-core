@@ -29,7 +29,12 @@ export type {
  * compilers). Kits may import from either path — they name the same type.
  */
 export type { UpdateInput } from '../update/types.js';
+export { nestDottedKeys, nestDottedKeysAll } from './agg-output.js';
 export { RepositoryBase, type RepositoryBaseOptions } from './base.js';
+export {
+  STANDARD_REPO_OPTION_KEYS,
+  type StandardRepoOptionKey,
+} from './options.js';
 export {
   PLUGIN_ORDER_CONSTRAINTS,
   type Plugin,
@@ -38,19 +43,30 @@ export {
   validatePluginOrder,
 } from './plugin-types.js';
 export type {
+  AggCacheOptions,
+  AggDateBucket,
+  AggDateBucketInterval,
+  AggDateBucketUnit,
+  AggExecutionHints,
   AggMeasure,
   AggPaginationRequest,
   AggRequest,
   AggResult,
   AggRow,
+  AggTopN,
+  AggTopNTies,
+  BulkCreateResult,
   BulkWriteOperation,
   BulkWriteResult,
+  ClaimTransition,
+  ClaimVersionTransition,
   DeleteManyResult,
   DeleteOptions,
   DeleteResult,
   FilterInput,
   FindOneAndUpdateOptions,
   InferDoc,
+  KeysetAggPaginationResult,
   MinimalRepo,
   PaginationParams,
   QueryOptions,

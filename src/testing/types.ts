@@ -48,6 +48,71 @@ export interface ConformanceDoc {
 // ──────────────────────────────────────────────────────────────────────
 
 /**
+ * Per-aggregate-op support matrix. Some aggregate ops aren't
+ * portable across every backend — `percentile` requires Mongo 7+'s
+ * `$percentile` accumulator or SQL's `PERCENTILE_CONT`, neither of
+ * which sqlitekit ships. Scenarios that exercise a non-universal
+ * op gate on the matching flag and `it.skip` on the off branch so
+ * the suite runs cleanly across every environment.
+ *
+ * **Stability contract.** Adding a flag here is additive — kits
+ * that don't declare the new key default to `false`, which is the
+ * conservative choice. Renaming or removing a flag is a breaking
+ * change.
+ *
+ * **Naming convention.** Flag names match the IR field they gate
+ * (`percentile` → `AggMeasure.op === 'percentile'`). When in doubt,
+ * grep the IR types and use the same identifier.
+ */
+export interface AggregateOpsSupport {
+  /**
+   * `{ op: 'percentile', field, p }` measure. Mongokit (Mongo 7+)
+   * supports it; sqlitekit throws by design (no native function).
+   * Hosts targeting percentile dashboards pin to a kit that supports it.
+   */
+  percentile?: boolean;
+  /**
+   * `{ op: 'stddev', field }` / `{ op: 'stddevPop', field }` measures.
+   * Mongokit supports both via native `$stdDevSamp` / `$stdDevPop`
+   * (Welford). Sqlitekit throws — SQLite has no native STDDEV and
+   * the computational formula is numerically unstable. Hosts pin
+   * to mongokit / future pgkit when stddev is load-bearing.
+   */
+  stddev?: boolean;
+  /**
+   * `topN: { partitionBy, sortBy, limit, ties }` filter. Both
+   * mongokit and sqlitekit support it as of repo-core 0.4.x; the
+   * flag exists for future kits that may not ship window-function
+   * equivalents.
+   */
+  topN?: boolean;
+  /**
+   * `dateBuckets: { ..., interval: { every, unit } }` custom-bin
+   * form. Kits that only support named-bucket form can leave this
+   * `false`; tests for `'minute'` / `'hour'` named intervals are
+   * gated separately via `dateBucketSubMinute`.
+   */
+  customDateBuckets?: boolean;
+  /**
+   * Sub-day-granularity named buckets (`'minute'` / `'hour'`).
+   * Older kits may only support day+ named intervals; flag exists
+   * to gate those scenarios cleanly.
+   */
+  dateBucketSubMinute?: boolean;
+  /**
+   * Per-request `cache?: AggCacheOptions` slot — TTL / tags / SWR /
+   * bypass / `repo.invalidateAggregateCache(tags)`. Both mongokit
+   * and sqlitekit support it as of repo-core 0.4.x. Future kits
+   * without the wiring can leave this false to skip cache scenarios.
+   *
+   * Independent of which CACHE BACKEND the harness wires — test
+   * scenarios construct their own `createMemoryCacheAdapter()` so
+   * this flag is purely "does the kit honour the request slot".
+   */
+  cache?: boolean;
+}
+
+/**
  * Per-backend feature flags. Scenarios that exercise a non-universal
  * capability (transactions in D1, upsert in narrow stores) check the
  * flag and `it.skip` on the off branch — so the suite runs on every
@@ -69,8 +134,22 @@ export interface ConformanceFeatures {
   duplicateKeyError: boolean;
   /** `distinct(field)`. */
   distinct: boolean;
-  /** Portable `aggregate({ measures, groupBy, having })`. */
+  /**
+   * Portable `aggregate({ measures, groupBy, having })`. Coarse
+   * top-level flag — gates the entire `describe('aggregate')` block.
+   * Per-op flags live on `aggregateOps` for asymmetric capabilities
+   * (percentile, custom date bins, etc.) that some kits skip while
+   * still supporting the core aggregate surface.
+   */
   aggregate: boolean;
+  /**
+   * Per-op feature matrix for the aggregate surface. Optional —
+   * absent matrix or absent key both mean "not supported", so kits
+   * opt INTO scenarios for ops they implement. This avoids the
+   * trap where a future kit silently fails percentile tests because
+   * it forgot to set the flag.
+   */
+  aggregateOps?: AggregateOpsSupport;
   /** `getOrCreate(filter, data)`. */
   getOrCreate: boolean;
   /** `count(filter)` and `exists(filter)`. */
@@ -95,6 +174,26 @@ export interface ConformanceContext<TDoc extends ConformanceDoc = ConformanceDoc
    * be omitted; scenarios that need it will skip if missing.
    */
   secondaryRepo?: StandardRepo<TDoc> & MinimalRepo<TDoc>;
+  /**
+   * Optional repo-with-cache for cache-suite scenarios. Required iff
+   * the harness declares `features.aggregateOps.cache === true`.
+   *
+   * **Why a separate repo** rather than reconfiguring the primary
+   * one: cache state survives across calls within a test, and the
+   * primary repo is shared by every other suite. A dedicated cached
+   * repo keeps the cache scenarios hermetic.
+   *
+   * The bound type widens to include `invalidateAggregateCache` —
+   * cast at the use site since the contract type
+   * (`StandardRepo<TDoc>`) doesn't currently surface it. This
+   * intentionally leaves the contract narrower than the
+   * implementation; consumers pin to a specific kit when they need
+   * the invalidate method on their `RepositoryLike` slot.
+   */
+  cachedRepo?: StandardRepo<TDoc> &
+    MinimalRepo<TDoc> & {
+      invalidateAggregateCache(tags?: readonly string[]): Promise<number>;
+    };
   /** Release resources (close db, drop collection). Must be idempotent. */
   cleanup(): Promise<void>;
 }

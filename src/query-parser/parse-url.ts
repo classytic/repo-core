@@ -12,10 +12,10 @@
  *   ?price[between]=10,100             → between('price', 10, 100)
  *   ?deletedAt[exists]=false           → isNull('deletedAt')
  *
- * Reserved keys (never parsed as filters):
- *   - `page`, `limit`, `after`
- *   - `sort`, `select`, `populate`
- *   - `search`
+ * Reserved keys (never parsed as filters) — see `./reserved.ts`:
+ *   - `page`, `limit`, `after`, `sort`, `select`, `populate`, `search`
+ *   - any `_*` key (framework dispatch namespace: `_count`, `_distinct`,
+ *     `_exists`, ...)
  *
  * Kits never reimplement this — they import and use it as-is. Arc-next
  * and fluid can also import this to unit-test their URL emission.
@@ -44,6 +44,7 @@ import {
   TRUE,
 } from '../filter/index.js';
 import { coerceList, coerceValue } from './coerce.js';
+import { isControlParam } from './reserved.js';
 import type {
   BracketOperator,
   ParsedPopulate,
@@ -59,17 +60,15 @@ const DEFAULT_MAX_LIMIT = 200;
 const DEFAULT_MAX_DEPTH = 10;
 const DEFAULT_MAX_REGEX = 500;
 const DEFAULT_MAX_SEARCH = 200;
-
-/** Reserved top-level URL keys the parser handles specially. */
-const RESERVED_KEYS: ReadonlySet<string> = new Set([
-  'page',
-  'limit',
-  'after',
-  'sort',
-  'select',
-  'populate',
-  'search',
-]);
+/**
+ * Hard cap on URL parameter KEY length. Param keys land in regex-based
+ * bracket parsing (`/^([^[\]]+)\[([^\]]+)\]$/` and friends); without a
+ * length bound, a hostile caller can submit a 1MB key and force the
+ * parser to scan the entire string for every regex try. Keys that
+ * exceed this cap are silently skipped — legitimate URL params don't
+ * approach this bound.
+ */
+const MAX_PARAM_KEY_LENGTH = 256;
 
 const ALL_OPERATORS: ReadonlySet<BracketOperator> = new Set([
   'eq',
@@ -244,6 +243,7 @@ function parsePopulate(params: NormalizedParams): ParsedPopulate[] {
   // Collect keys that start with `populate[...]`
   const byField: Map<string, { select?: string; match?: Record<string, unknown> }> = new Map();
   for (const [key, value] of params.entries()) {
+    if (key.length > MAX_PARAM_KEY_LENGTH) continue;
     if (!key.startsWith('populate[')) continue;
     const match = /^populate\[([^\]]+)\](?:\[([^\]]+)\](?:\[([^\]]+)\])?)?$/.exec(key);
     if (!match) continue;
@@ -279,7 +279,8 @@ function parseFilters(params: NormalizedParams, ctx: FilterParseContext): Filter
   const fieldGroups: Map<string, Filter[]> = new Map();
 
   for (const [key, rawValue] of params.entries()) {
-    if (RESERVED_KEYS.has(key) || key.startsWith('populate[')) continue;
+    if (key.length > MAX_PARAM_KEY_LENGTH) continue;
+    if (isControlParam(key) || key.startsWith('populate[')) continue;
 
     const bracket = /^([^[\]]+)\[([^\]]+)\]$/.exec(key);
     let field: string;
