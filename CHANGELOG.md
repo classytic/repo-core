@@ -4,6 +4,249 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-04
+
+### Added — kit-shared building blocks (consolidation)
+
+- **`@classytic/repo-core/aggregate`** (new subpath) — kit-neutral aggregate IR helpers that every backend's compiler consumes identically: `normalizeGroupBy`, `validateMeasures`, `encodeAggCursor`, `decodeAggCursor`, `isKeysetMode`, `DecodedCursor`. mongokit + sqlitekit shipped byte-identical copies of these for the prior several releases; promoting them here keeps the IR contract honest. The driver-specific predicate builders (`buildKeysetPredicate` in mongokit, `buildKeysetHaving` in sqlitekit) stay kit-local.
+- **`@classytic/repo-core/plugins`** (new subpath) — kit-neutral plugin building blocks. Currently exports `payloadHasTenantField` (handles all 5 policy keys: data, dataArray, query, filters, operations) and `adminBypass` (skipWhen-compatible role-bypass factory). Both kits now consume these instead of shipping their own copies. Sqlitekit gains `adminBypass` for free as a side effect.
+
+### ⚠️ BREAKING — `cache/deferred.ts` removed (use `Promise.withResolvers()`)
+
+- **`createDeferred()` and `Deferred<T>` no longer exported from `@classytic/repo-core/cache`.** Both were thin wrappers around `Promise.withResolvers()`, which Node 22+ ships natively (the package's platform floor). The cache engine's single-flight map now uses the native primitive directly with zero indirection.
+- **Migration:** if you imported them, replace `import { createDeferred } from '@classytic/repo-core/cache'` with `Promise.withResolvers<T>()`. Same shape (`{ promise, resolve, reject }`); behavior is identical.
+
+### Fixed — security & robustness hardening
+
+- **DoS surface in URL parser**: `parseUrl` now drops parameter keys longer than 256 chars before bracket-regex parsing. Without the cap, a hostile 1MB key forced repeated full-string regex scans. Legitimate URL params don't approach the bound. (`src/query-parser/parse-url.ts`)
+- **Cursor payload type validation**: `decodeCursor` now type-checks every payload field, not just presence. A corrupted token shaped `{ v: { evil: true } }` previously slipped past the `'v' in p` guard and produced opaque errors downstream. (`src/pagination/cursor.ts`)
+- **Regex compile-per-doc on in-memory filter**: `matchFilter`'s `like` and `regex` cases now use a bounded LRU cache (256 entries) keyed by `(pattern, flags)`. Prior implementation compiled a fresh `RegExp` on every call — measurable cost when `asPredicate(filter)` runs over 100k docs. (`src/filter/match.ts`)
+
+### Cache hash upgrade (djb2 → FNV-1a 64-bit)
+
+- **`buildCacheKey` now uses FNV-1a 64-bit** (was djb2 32-bit). At multi-tenant fleet scale (10k tenants × dozens of cached aggregations each), djb2's 32-bit space hit ~50% birthday-paradox collision around 65k distinct keys. FNV-1a 64-bit pushes that threshold to ~4B keys. Same call site, same key shape, same regex-compatible base-36 output.
+- **Operational note for deployment:** existing Redis entries hash differently after the swap, so cold cache for one TTL cycle post-deploy. The collection-version orphan path already handles this for write-driven invalidation.
+
+### Cache layer — atomic counters, parallel invalidation, prefetch, timeout
+
+- **`CacheAdapter.increment(key, by, ttl)`** — optional atomic counter primitive. When the adapter ships it (Redis `INCRBY`, in-memory `Map`, future driver-native impls), `bumpModelVersion` produces strictly-monotonic versions across concurrent multi-pod writes — no lost bumps. Adapters without `increment` (Cloudflare KV, etc.) fall back to `get → max → set`; correct in single-pod, accepts a tiny race window in multi-pod (mitigated by `Date.now()` floor).
+- **Parallelized `invalidateByTags`** — fan-out reads + fan-out deletes via `Promise.all`. For Redis-backed adapters with pipelining, 5 tags × 100 keys completes in ~2 RTTs instead of 510. ~10× speedup on hot tags.
+- **`CacheEngine.prefetch(key, opts, fetcher)`** — TanStack-equivalent cache warming. Single-flight semantics: 100 concurrent prefetches for the same key run the fetcher exactly once. Returns cached on hit, fetches + stores on miss, dedupes via the engine's pending map.
+- **`withTimeout(adapter, { ms, onTimeout, onSlow })`** — adapter decorator that fail-fasts on slow backends. `onTimeout: 'miss'` (default) makes slow gets behave as cache misses (kit serves uncached); `'throw'` propagates `CacheTimeoutError`. `onSlow` callback for observability.
+- **`scheduleBackground`** is now a public export from `@classytic/repo-core/cache` — hosts can use the same cross-runtime primitive for their own post-response work.
+
+### Cache layer — production hardening (TanStack-aligned) + cross-runtime
+
+Six gaps in the v1 unified cache layer fixed before any prod traffic:
+
+1. **Single-flight on miss** — `CacheEngine.claimPending()` / `getPending()` / `resolvePending()` / `rejectPending()`. Concurrent misses for the same key wait on the first claimer's promise instead of running N redundant fetches. Cache-stampede prevention; TanStack `QueryClient`-equivalent.
+2. **Per-scope version-bump** — `bumpModelVersion(model, scopeKey?)` and `getModelVersion(model, scopeKey?)`. Writes inside `org:abc` no longer invalidate `org:xyz`'s cached reads. Targeted invalidation; matches TanStack's "exact match" semantics.
+3. **Cross-runtime SWR scheduling** — new `runtime.ts` exposes `scheduleBackground` that picks `setImmediate` on Node / Bun and `setTimeout(0)` on Cloudflare Workers / Deno Deploy / browser. Either way the callback fires after the current sync block + microtask queue, ensuring the user's response writes to the socket BEFORE the bg fetch's first await. (Old impl used `setImmediate` directly — `ReferenceError` on edge runtimes.)
+4. **TTL-bounded tag index** — index entries inherit their cached entries' TTLs (capped at 24h). Old impl used `ttlSeconds: 0` ("never expire" in Redis); side-index grew unboundedly on hot tags.
+5. **`error:<op>` rejects pending** — when the claimer's executor errors, the plugin's `error:<op>` hook rejects the deferred so single-flight waiters fail-fast. No hanging promises, no double-fetch on transient backend failures.
+6. **Allowlist-per-op shape keys** — `DEFAULT_SHAPE_KEYS_BY_OP` maps each read op to the fields that actually affect result shape. Only those fields participate in the cache key. Replaces the prior denylist (which would silently include any new context field a kit added — exploding miss rates if e.g. `requestId` slipped through). Hosts can override per-op via `cachePlugin({ shapeKeysByOp })`.
+
+### Code organization
+
+The unified plugin (`@classytic/repo-core/cache`) is now split into focused modules:
+
+```
+cache/
+  plugin/
+    index.ts                  # cachePlugin factory + types + handle (~200 LOC)
+    context.ts                # typed context slots + extraction + shape-keys (~170 LOC)
+    read-hooks.ts             # before/after/error for read ops (~180 LOC)
+    invalidation-hooks.ts     # after for write ops (~60 LOC)
+    swr.ts                    # background-refresh scheduler (~50 LOC)
+  engine.ts                   # TTL + SWR + tag + version + single-flight (~220 LOC)
+  runtime.ts                  # cross-runtime scheduleBackground (~50 LOC)
+  ...
+```
+
+Each module has one purpose. Replaces the prior 564-LOC `plugin.ts` mega-file.
+
+### Added — `Deferred<T>` utility
+
+`createDeferred<T>()` exported from `@classytic/repo-core/cache` — a Promise plus its `resolve`/`reject` handles, externalized. Same primitive `Promise.withResolvers()` provides natively in Node 22+; we ship our own to keep the contract explicit and support older runtimes.
+
+### Added — Unified cache layer (`@classytic/repo-core/cache`)
+
+One `cachePlugin({ adapter })` for every kit + arc + Express/Nest hosts. Replaces three independent SWR/TTL/tag implementations (mongokit's CRUD `cachePlugin` + aggregate `withAggCache`, sqlitekit's local `cachePlugin`, arc's `QueryCache`) with one canonical hook integration.
+
+#### Public surface (`@classytic/repo-core/cache`)
+
+```ts
+import {
+  cachePlugin,                  // hook integration — plugs into RepositoryBase
+  CacheEngine,                   // direct SWR + TTL + tag flow over a CacheAdapter
+  buildEnvelope, inspectEnvelope, type CacheEnvelope,
+  buildCacheKey, extractScopeTags, type BuildKeyInput,
+  appendKeyToTags, invalidateByTags as invalidateByTagsImpl,
+  bumpModelVersion, getModelVersion,
+  resolveCacheOptions, type CacheOptions, type ResolvedCacheOptions, type CacheReadResult,
+  // already shipped:
+  type CacheAdapter, createMemoryCacheAdapter, stableStringify,
+} from '@classytic/repo-core/cache';
+```
+
+#### TanStack Query-shaped per-call options
+
+Same shape across CRUD + aggregate, kit-agnostic:
+
+```ts
+{
+  staleTime?: number;     // seconds fresh
+  gcTime?: number;        // seconds retained past stale (default 60)
+  swr?: boolean;          // serve-stale + bg refresh
+  tags?: readonly string[];
+  bypass?: boolean;
+  enabled?: boolean;
+  key?: string;           // explicit override
+}
+```
+
+#### What the plugin does
+
+1. Subscribes to `before:<op>` / `after:<op>` for every read op (`getById`, `getAll`, `getOne`, `getByQuery`, `count`, `exists`, `distinct`, `aggregate`, `aggregatePaginate`) — configurable via `enabled: [...]`.
+2. Subscribes to `after:<op>` for every mutating op (`create`, `update`, `delete`, `claim`, ...) — configurable via `invalidating: [...]`. Bumps the model's version (orphans every cached read in O(1)) AND invalidates the model-tag (cross-aggregation invalidation).
+3. Auto-injects scope tags (`org:<id>`, `user:<id>`) from `context.filter` so cross-tenant cache poisoning is structurally impossible.
+4. Hooks register at `HOOK_PRIORITY.CACHE` (200) — multi-tenant + soft-delete (POLICY = 100) run first so their filter mutations land in the cache key.
+5. Attaches `repo.cache` handle exposing `invalidateByTags(tags)`, `bumpModelVersion(model)`, `clear()`.
+
+#### Strictly-monotonic version bumps
+
+`bumpModelVersion` uses `max(Date.now(), previous + 1)` so same-millisecond writes (cache prime + write hit at the same ms) don't collide, fixing a real correctness gap the prior `Date.now()`-only impl had.
+
+#### `AggCacheOptions` is now an alias for `CacheOptions`
+
+Same shape across CRUD + aggregate. Old field names (`ttl`, `staleWhileRevalidate`) removed — migrate to `staleTime`, `swr`. Ecosystem packages (mongokit, sqlitekit, arc) all consume the unified type.
+
+#### Removed
+
+- `/aggregate-cache` subpath — superseded by the unified `/cache` plugin (which handles aggregate ops natively via the `before:aggregate` hook).
+
+#### Migration (kit + host)
+
+```ts
+// Before — kit-specific cache plugins + constructor option
+new Repository(model, [cachePlugin({ adapter, ttlSeconds: 60 })], {}, {
+  aggregateCache: adapter,  // separate constructor option
+});
+repo.aggregate({ measures, cache: { ttl: 60, staleWhileRevalidate: true } });
+
+// After — one plugin, one shape
+new Repository(model, [
+  multiTenantPlugin({ tenantField: 'orgId' }),
+  cachePlugin({ adapter, defaults: { staleTime: 60, gcTime: 300, swr: true } }),
+]);
+repo.aggregate({ measures, cache: { staleTime: 60, swr: true, tags: ['orders'] } });
+repo.getAll(filter, { cache: { staleTime: 30 } });
+await repo.cache?.invalidateByTags(['orders']);
+```
+
+### Added — `StandardRepo.claim()` and `claimVersion()` (atomic CAS, REQUIRED on the contract)
+
+Standardizes the canonical state-machine write that every domain package was hand-rolling on top of `findOneAndUpdate`:
+
+```ts
+const claimed = await repo.claim?.(runId, { from: 'waiting', to: 'running' }, {
+  lastHeartbeat: new Date(),
+  workerId: 'worker-12',
+});
+if (!claimed) return; // someone else got it
+```
+
+**Cross-kit portable.** Mongokit compiles to `findOneAndUpdate({ _id, status: from }, { $set: { status: to, ...patch } })`. SQL kits compile to `UPDATE x SET ... WHERE id = ? AND status = <from> RETURNING *`. Prismakit compiles to `prisma.x.updateMany({ where: { id, status: from }, data: ... })` followed by a `findUnique` when `count > 0`. Same input, same null-on-race semantics across every backend.
+
+**Pairs with `@classytic/primitives/state-machine`** — different layers:
+- `defineStateMachine()` answers "is `from → to` legal in the model?" (compile-time table + early throw)
+- `claim()` answers "did we win the transition vs concurrent writers?" (runtime null on race)
+
+The state field defaults to `'status'` (matches the convention across `streamline`, `@classytic/order`, `revenue`, `invoice`); pass `{ field: 'phase', from, to }` for state machines keyed off a different column.
+
+#### New types exported from `@classytic/repo-core/repository`
+
+- `ClaimTransition` — `{ field?, from, to, where? }` argument shape for `claim` (`where` is the compound-CAS predicate slot — see below).
+- `ClaimVersionTransition` — `{ field?, from: number | undefined, by?, where? }` argument shape for `claimVersion`. `from === undefined` is admitted for first-write CAS (matches docs whose version field is null OR missing).
+
+#### Added to `StandardRepo<TDoc>` — REQUIRED methods (not optional)
+
+```ts
+claim(
+  id: string,
+  transition: ClaimTransition,
+  patch?: Partial<TDoc>,
+  options?: WriteOptions,
+): Promise<TDoc | null>;
+
+claimVersion(
+  id: string,
+  transition: ClaimVersionTransition,
+  update: Record<string, unknown>,
+  options?: WriteOptions,
+): Promise<TDoc | null>;
+```
+
+**Required, not optional.** During pre-release dev iterations, `claim?` was optional as scaffolding while kits implemented. Both mongokit and sqlitekit ship them as concrete class primitives, and downstream domain packages (~10 in the classytic codebase) carry FSM verbs depending on them — none gracefully degrade. Required-on-the-contract removes the `if (repo.claim) { ... }` boilerplate at every call site and surfaces missing implementations at the conformance gate instead of at runtime.
+
+#### `ClaimTransition.where` — compound-CAS predicate
+
+Real-world audit (streamline, commission, yard, revenue, order, invoice): the bare `{ [idField]: id, [field]: from }` filter shape fits ~5% of atomic-claim sites in production. The other 95% carry compound predicates — paused guards, retry-time guards, heartbeat-staleness, sub-document `$elemMatch`, `$or` for missing-or-stale fields. Without a way to express those, `claim()` covered the textbook example but couldn't replace the hand-rolled CAS calls in production.
+
+`ClaimTransition.where` AND-merges arbitrary predicates alongside the canonical id + state-field match:
+
+```ts
+const claimed = await repo.claim?.(runId, {
+  from: 'waiting',
+  to: 'running',
+  where: {
+    paused: { $ne: true },
+    'scheduling.retryAfter': { $lte: new Date() },
+  },
+}, { lastHeartbeat: new Date() });
+```
+
+Cross-kit notes:
+- Mongokit: ANDed into the `findOneAndUpdate` filter.
+- SQL kits: ANDed into the `WHERE` clause (raw column literals accepted; portable Filter IR is compiled).
+- Prismakit: merged as additional keys on the `where` object.
+
+Null-on-race semantics unchanged — if no doc matches the full compound filter (state OR any `where` predicate), `claim` returns `null`. The caller can't distinguish "lost race" from "guard predicate failed"; both mean "don't proceed."
+
+Driven by streamline's audit (1 of 21 sites fit the bare shape; 21 of 21 fit the compound shape). Same pattern across the other audited packages.
+
+#### `ClaimTransition.from` widened to `unknown | readonly unknown[]` — multi-source CAS
+
+Single-value `from` covers the textbook one-source transition (`waiting → running`). Real-world state machines also need to claim from one of multiple source states — commission's `voidRecord` / `markClawedBack` / `endAgreement` / `_transition` (4 sites), media-kit's `pending|processing → error` catch-block. `from` now accepts an array; kit compilers emit `[stateField] IN (...)` (SQL) or `[stateField]: { $in: [...] }` (mongo).
+
+```ts
+// "From any non-terminal state to voided"
+await repo.claim?.(id, { from: ['pending', 'approved', 'sent'], to: 'voided' });
+```
+
+Single-value `from` is unchanged (back-compatible). Array form is opt-in — pass an array to enable.
+
+**`from === to` is allowed** — the documented idempotent re-claim semantic. Yard's `reviseDeparture` writes `departed → departed` to atomically refresh the row's payload while asserting it hasn't moved on. The CAS still returns `null` if the row left the source state, so race-loss semantics hold.
+
+#### Migration
+
+Pre-0.4.0 callers wrote:
+
+```ts
+const claimed = await repo.findOneAndUpdate(
+  { _id: id, status: 'waiting' },
+  { $set: { status: 'running', lastHeartbeat: new Date() }, },
+);
+```
+
+Post-0.4.0:
+
+```ts
+const claimed = await repo.claim?.(id, { from: 'waiting', to: 'running' }, { lastHeartbeat: new Date() });
+```
+
+The old form keeps working — `claim()` is an additive optional method, not a rename.
+
 ## [0.3.0] - 2026-04-29
 
 ### Added — Aggregate pagination shapes

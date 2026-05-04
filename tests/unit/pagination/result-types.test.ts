@@ -14,25 +14,22 @@
 
 import { describe, expect, it } from 'vitest';
 import type {
-  AggregatePaginationResponse,
   AggregatePaginationResult,
   AggregatePaginationResultCore,
   AnyPaginationResult,
-  BareListResponse,
-  KeysetPaginationResponse,
+  BareListResult,
   KeysetPaginationResult,
   KeysetPaginationResultCore,
-  OffsetPaginationResponse,
   OffsetPaginationResult,
   OffsetPaginationResultCore,
-  PaginatedResponse,
+  PaginatedResult,
 } from '../../../src/pagination/index.js';
 
 describe('OffsetPaginationResult<TDoc, TExtra>', () => {
   it('default TExtra leaves the core shape unchanged', () => {
     const result: OffsetPaginationResult<{ id: string }> = {
       method: 'offset',
-      docs: [{ id: 'u1' }],
+      data: [{ id: 'u1' }],
       page: 1,
       limit: 20,
       total: 1,
@@ -41,14 +38,14 @@ describe('OffsetPaginationResult<TDoc, TExtra>', () => {
       hasPrev: false,
     };
     expect(result.method).toBe('offset');
-    expect(result.docs).toHaveLength(1);
+    expect(result.data).toHaveLength(1);
   });
 
   it('TExtra adds typed fields on the envelope', () => {
     type WithWarning = OffsetPaginationResult<{ id: string }, { warning?: string }>;
     const result: WithWarning = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 100,
       limit: 20,
       total: 2000,
@@ -63,7 +60,7 @@ describe('OffsetPaginationResult<TDoc, TExtra>', () => {
   it('Core interface is directly usable (named so StandardRepo contracts can reference it)', () => {
     const core: OffsetPaginationResultCore<{ id: string }> = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -80,7 +77,7 @@ describe('OffsetPaginationResult<TDoc, TExtra>', () => {
       | KeysetPaginationResult<{ id: string }>;
     const result: Paged = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -101,7 +98,7 @@ describe('KeysetPaginationResult<TDoc, TExtra>', () => {
   it('default TExtra leaves the core shape unchanged', () => {
     const result: KeysetPaginationResult<{ id: string }> = {
       method: 'keyset',
-      docs: [{ id: 'u1' }],
+      data: [{ id: 'u1' }],
       limit: 20,
       hasMore: false,
       next: null,
@@ -114,7 +111,7 @@ describe('KeysetPaginationResult<TDoc, TExtra>', () => {
     type WithCursorVersion = KeysetPaginationResult<{ id: string }, { cursorVersion: number }>;
     const result: WithCursorVersion = {
       method: 'keyset',
-      docs: [],
+      data: [],
       limit: 20,
       hasMore: false,
       next: null,
@@ -126,7 +123,7 @@ describe('KeysetPaginationResult<TDoc, TExtra>', () => {
   it('Core interface is exported for StandardRepo references', () => {
     const core: KeysetPaginationResultCore<{ id: string }> = {
       method: 'keyset',
-      docs: [],
+      data: [],
       limit: 20,
       hasMore: false,
       next: null,
@@ -139,7 +136,7 @@ describe('AggregatePaginationResult<TDoc, TExtra>', () => {
   it('default TExtra leaves the core shape unchanged', () => {
     const result: AggregatePaginationResult<{ id: string }> = {
       method: 'aggregate',
-      docs: [{ id: 'u1' }],
+      data: [{ id: 'u1' }],
       page: 1,
       limit: 20,
       total: 1,
@@ -154,7 +151,7 @@ describe('AggregatePaginationResult<TDoc, TExtra>', () => {
     type WithWarning = AggregatePaginationResult<{ id: string }, { warning?: string }>;
     const result: WithWarning = {
       method: 'aggregate',
-      docs: [],
+      data: [],
       page: 100,
       limit: 20,
       total: 2000,
@@ -169,7 +166,7 @@ describe('AggregatePaginationResult<TDoc, TExtra>', () => {
   it('Core interface is directly usable', () => {
     const core: AggregatePaginationResultCore<{ id: string }> = {
       method: 'aggregate',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -185,7 +182,7 @@ describe('AnyPaginationResult<TDoc>', () => {
   it('discriminant narrows across all three result kinds', () => {
     const offset: AnyPaginationResult<{ id: string }> = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -195,14 +192,14 @@ describe('AnyPaginationResult<TDoc>', () => {
     };
     const keyset: AnyPaginationResult<{ id: string }> = {
       method: 'keyset',
-      docs: [],
+      data: [],
       limit: 20,
       hasMore: false,
       next: null,
     };
     const aggregate: AnyPaginationResult<{ id: string }> = {
       method: 'aggregate',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -217,65 +214,20 @@ describe('AnyPaginationResult<TDoc>', () => {
   });
 });
 
-describe('Wire envelopes — { success: true } & *Result', () => {
-  it('OffsetPaginationResponse intersects success: true with the result', () => {
-    const wire: OffsetPaginationResponse<{ id: string }> = {
-      success: true,
-      method: 'offset',
-      docs: [],
-      page: 1,
-      limit: 20,
-      total: 0,
-      pages: 0,
-      hasNext: false,
-      hasPrev: false,
+describe('PaginatedResult — single union for all list shapes', () => {
+  it('BareListResult has no method discriminant', () => {
+    const wire: BareListResult<{ id: string }> = {
+      data: [{ id: 'u1' }],
     };
-    expect(wire.success).toBe(true);
-    expect(wire.method).toBe('offset');
-  });
-
-  it('KeysetPaginationResponse', () => {
-    const wire: KeysetPaginationResponse<{ id: string }> = {
-      success: true,
-      method: 'keyset',
-      docs: [],
-      limit: 20,
-      hasMore: false,
-      next: null,
-    };
-    expect(wire.method).toBe('keyset');
-  });
-
-  it('AggregatePaginationResponse', () => {
-    const wire: AggregatePaginationResponse<{ id: string }> = {
-      success: true,
-      method: 'aggregate',
-      docs: [],
-      page: 1,
-      limit: 20,
-      total: 0,
-      pages: 0,
-      hasNext: false,
-      hasPrev: false,
-    };
-    expect(wire.method).toBe('aggregate');
-  });
-
-  it('BareListResponse has no method discriminant', () => {
-    const wire: BareListResponse<{ id: string }> = {
-      success: true,
-      docs: [{ id: 'u1' }],
-    };
-    expect(wire.success).toBe(true);
+    expect(wire.data).toHaveLength(1);
     expect('method' in wire).toBe(false);
   });
 
-  it('PaginatedResponse union covers all four wire shapes', () => {
+  it('PaginatedResult union covers all four list shapes', () => {
     // Compile-time check: each shape is assignable to the union.
-    const a: PaginatedResponse<{ id: string }> = {
-      success: true,
+    const a: PaginatedResult<{ id: string }> = {
       method: 'offset',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -283,18 +235,16 @@ describe('Wire envelopes — { success: true } & *Result', () => {
       hasNext: false,
       hasPrev: false,
     };
-    const b: PaginatedResponse<{ id: string }> = {
-      success: true,
+    const b: PaginatedResult<{ id: string }> = {
       method: 'keyset',
-      docs: [],
+      data: [],
       limit: 20,
       hasMore: false,
       next: null,
     };
-    const c: PaginatedResponse<{ id: string }> = {
-      success: true,
+    const c: PaginatedResult<{ id: string }> = {
       method: 'aggregate',
-      docs: [],
+      data: [],
       page: 1,
       limit: 20,
       total: 0,
@@ -302,12 +252,12 @@ describe('Wire envelopes — { success: true } & *Result', () => {
       hasNext: false,
       hasPrev: false,
     };
-    const d: PaginatedResponse<{ id: string }> = { success: true, docs: [] };
-    expect([a.method, b.method, c.method, 'docs' in d]).toEqual([
-      'offset',
-      'keyset',
-      'aggregate',
-      true,
-    ]);
+    const d: PaginatedResult<{ id: string }> = { data: [] };
+    expect([
+      'method' in a && a.method,
+      'method' in b && b.method,
+      'method' in c && c.method,
+      'data' in d,
+    ]).toEqual(['offset', 'keyset', 'aggregate', true]);
   });
 });

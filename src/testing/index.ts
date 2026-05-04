@@ -12,6 +12,7 @@
 
 export { runStandardRepoConformance } from './conformance.js';
 export type {
+  AggregateOpsSupport,
   ConformanceContext,
   ConformanceDoc,
   ConformanceFeatures,

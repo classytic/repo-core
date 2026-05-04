@@ -8,6 +8,7 @@
 
 export { coerceList, coerceValue } from './coerce.js';
 export { parseUrl } from './parse-url.js';
+export { isControlParam, STANDARD_RESERVED_PARAMS } from './reserved.js';
 export type {
   BracketOperator,
   ParsedPopulate,

@@ -14,7 +14,7 @@
  * it the same way.
  */
 
-import type { MinimalRepo, StandardRepo } from '../repository/index.js';
+import type { DeleteResult, MinimalRepo, StandardRepo } from '../repository/index.js';
 import type { SchemaBuilderOptions } from '../schema/types.js';
 
 /**
@@ -66,16 +66,7 @@ export interface AdapterRepositoryInput<TDoc = unknown> {
   getById(id: string, options?: unknown): Promise<TDoc | null>;
   create(data: Partial<TDoc>, options?: unknown): Promise<TDoc>;
   update(id: string, data: Partial<TDoc>, options?: unknown): Promise<TDoc | null>;
-  delete(
-    id: string,
-    options?: unknown,
-  ): Promise<{
-    success: boolean;
-    message: string;
-    id?: string;
-    soft?: boolean;
-    count?: number;
-  }>;
+  delete(id: string, options?: unknown): Promise<DeleteResult | null>;
 }
 
 /**

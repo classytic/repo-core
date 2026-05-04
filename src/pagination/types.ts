@@ -93,7 +93,7 @@ export interface DecodedCursor {
  */
 export interface OffsetPaginationResultCore<TDoc> {
   method: 'offset';
-  docs: TDoc[];
+  data: TDoc[];
   page: number;
   limit: number;
   total: number;
@@ -131,7 +131,7 @@ export type OffsetPaginationResult<
  */
 export interface KeysetPaginationResultCore<TDoc> {
   method: 'keyset';
-  docs: TDoc[];
+  data: TDoc[];
   limit: number;
   hasMore: boolean;
   /** Cursor token for the next page, or `null` when there is none. */
@@ -163,7 +163,7 @@ export type KeysetPaginationResult<
  */
 export interface AggregatePaginationResultCore<TDoc> {
   method: 'aggregate';
-  docs: TDoc[];
+  data: TDoc[];
   page: number;
   limit: number;
   total: number;
@@ -201,67 +201,44 @@ export type AnyPaginationResult<
   | AggregatePaginationResult<TDoc, TExtra>;
 
 // ============================================================================
-// HTTP wire envelopes
+// Bare list + full-union shapes
 // ============================================================================
 //
-// These are what an HTTP server emits and a typed client expects. They're
-// the corresponding `*Result` shape intersected with `{ success: true }`.
+// Pagination shapes (`OffsetPaginationResult`, `KeysetPaginationResult`,
+// `AggregatePaginationResult`) above are the canonical types kits return
+// from `getAll` / `aggregatePaginate` AND what the HTTP wire emits — the
+// data shape and wire shape are intentionally identical (no envelope; HTTP
+// status discriminates success vs error, `ErrorContract` covers errors).
 //
-// Why `success: true` (literal, not `boolean`):
-//   - Errors take a different shape (`{ success: false, error, ... }`) — locking
-//     the literal lets a client-side type guard discriminate via `success` AND
-//     `method` cleanly.
-//   - Server-side, paginated success paths only ever emit `success: true`. The
-//     literal documents that contract instead of leaving it implicit.
-//
-// Why these live here (not `repo-core/wire`):
-//   - The `*Result` types already carry the `method` discriminant and align
-//     with what an HTTP client receives byte-for-byte plus the `success` flag.
-//     A separate subpath would force every wire-aware consumer to import twice.
-
-/** HTTP success envelope wrapping {@link OffsetPaginationResult}. */
-export type OffsetPaginationResponse<
-  TDoc,
-  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
-  TExtra extends Record<string, unknown> = {},
-> = { success: true } & OffsetPaginationResult<TDoc, TExtra>;
-
-/** HTTP success envelope wrapping {@link KeysetPaginationResult}. */
-export type KeysetPaginationResponse<
-  TDoc,
-  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
-  TExtra extends Record<string, unknown> = {},
-> = { success: true } & KeysetPaginationResult<TDoc, TExtra>;
-
-/** HTTP success envelope wrapping {@link AggregatePaginationResult}. */
-export type AggregatePaginationResponse<
-  TDoc,
-  // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
-  TExtra extends Record<string, unknown> = {},
-> = { success: true } & AggregatePaginationResult<TDoc, TExtra>;
+// `BareListResult` covers the additional case of an endpoint that doesn't
+// paginate (raw array wrapped in `{data}`). `PaginatedResult` is the union
+// of all four — what arc emits for any list endpoint, what arc-next types
+// against. Discriminate via `'method' in result`.
 
 /**
- * Bare list envelope — a successful response that wasn't paginated (raw
- * array result). No `method` discriminant; consumers branch on the absence
- * of pagination fields. Most useful when an endpoint sometimes paginates
- * and sometimes returns a fixed-size list.
+ * Bare list shape — an endpoint that doesn't paginate (raw array wrapped
+ * in `{data}` for consistency with paginated shapes). Consumers narrow on
+ * the absence of `method`. The `{data}` wrapper (vs returning the raw
+ * array) leaves room to add pagination metadata later without breaking
+ * the consumer contract.
  */
-export interface BareListResponse<TDoc> {
-  success: true;
-  docs: TDoc[];
+export interface BareListResult<TDoc> {
+  data: TDoc[];
 }
 
 /**
- * Union of every wire envelope a paginated/list endpoint can emit. Locked
- * to `success: true` because errors take a separate envelope shape — a
- * client-side type guard checks `success` first, then `method`.
+ * Union of every list shape an endpoint can emit — paginated (offset,
+ * keyset, aggregate) OR bare (`{data}` only). Discriminate via
+ * `'method' in result` — `method === 'offset' | 'keyset' | 'aggregate'`
+ * for paginated, absent for bare lists. Errors live on a separate path
+ * (HTTP status >= 400 → `ErrorContract`).
  */
-export type PaginatedResponse<
+export type PaginatedResult<
   TDoc,
   // biome-ignore lint/complexity/noBannedTypes: see `OffsetPaginationResult` for the rationale.
   TExtra extends Record<string, unknown> = {},
 > =
-  | OffsetPaginationResponse<TDoc, TExtra>
-  | KeysetPaginationResponse<TDoc, TExtra>
-  | AggregatePaginationResponse<TDoc, TExtra>
-  | BareListResponse<TDoc>;
+  | OffsetPaginationResult<TDoc, TExtra>
+  | KeysetPaginationResult<TDoc, TExtra>
+  | AggregatePaginationResult<TDoc, TExtra>
+  | BareListResult<TDoc>;

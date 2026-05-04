@@ -9,11 +9,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import {
-  type CacheAdapter,
-  createMemoryCacheAdapter,
-  stableStringify,
-} from '../../../src/cache/index.js';
+import { type CacheAdapter, createMemoryCacheAdapter } from '../../../src/cache/index.js';
+// `stableStringify` is internal — reach in via deep import for the test.
+import { stableStringify } from '../../../src/cache/stable-stringify.js';
 
 describe('createMemoryCacheAdapter', () => {
   it('satisfies the CacheAdapter contract structurally', () => {

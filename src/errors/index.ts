@@ -15,6 +15,7 @@ export {
   type ToDuplicateKeyHttpErrorOptions,
   toDuplicateKeyHttpError,
 } from './duplicate-key.js';
+export { errorContractSchema, errorDetailSchema } from './schema.js';
 export {
   type DuplicateKeyMeta,
   ERROR_CODES,
