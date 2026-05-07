@@ -1462,7 +1462,10 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    * deliberately nothing else, so behavior stays identical across
    * drivers.
    */
-  aggregate?<TRow extends AggRow = AggRow>(req: AggRequest): Promise<AggResult<TRow>>;
+  aggregate?<TRow extends AggRow = AggRow>(
+    req: AggRequest,
+    options?: QueryOptions,
+  ): Promise<AggResult<TRow>>;
 
   /**
    * Paginated aggregation. Returns one of two envelope shapes,
@@ -1481,6 +1484,7 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    */
   aggregatePaginate?<TRow extends AggRow = AggRow>(
     req: AggPaginationRequest,
+    options?: QueryOptions,
   ): Promise<OffsetPaginationResult<TRow> | KeysetAggPaginationResult<TRow>>;
 
   // ── Lookup / join (portable IR) ──────────────────────────────────────

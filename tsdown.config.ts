@@ -22,6 +22,7 @@ export default defineConfig({
     'better-auth/index': 'src/better-auth/index.ts',
     'aggregate/index': 'src/aggregate/index.ts',
     'plugins/index': 'src/plugins/index.ts',
+    'lock/index': 'src/lock/index.ts',
   },
   outputOptions: {
     preserveModules: true,
