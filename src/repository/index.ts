@@ -64,6 +64,7 @@ export type {
   DeleteOptions,
   DeleteResult,
   FilterInput,
+  FindAllOptions,
   FindOneAndUpdateOptions,
   InferDoc,
   KeysetAggPaginationResult,
