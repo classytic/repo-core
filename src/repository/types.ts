@@ -93,6 +93,27 @@ export interface WriteOptions extends QueryOptions {
 }
 
 /**
+ * Options for the optional `findAll` verb.
+ *
+ * `sort` is intentionally `Record<string, unknown>` (not a structured
+ * `SortSpec`) so kits can keep their own driver-shaped sort representation
+ * without forcing repo-core to depend on a particular dialect. Mongokit's
+ * `findAll` accepts `SortSpec | string`; sqlitekit accepts the same shape
+ * cross-walked into ORDER BY. `limit` is the bounded-but-not-paginated
+ * cap that callers reach for when `getAll` would force an unwanted count
+ * round-trip and `findAll` without a limit would over-fetch.
+ *
+ * Both fields are optional; absence means "kit default" (typically:
+ * `sort` defaults to natural order, `limit` defaults to "no limit").
+ */
+export interface FindAllOptions extends QueryOptions {
+  /** Sort disambiguating when natural order isn't acceptable. */
+  sort?: Record<string, unknown> | string;
+  /** Cap the result set at the driver level. When omitted, returns all matching docs. */
+  limit?: number;
+}
+
+/**
  * Delete-operation options.
  *
  * `mode: 'hard'` opts out of soft-delete interception when the kit has a
@@ -1355,7 +1376,7 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
   count?(filter?: FilterInput, options?: QueryOptions): Promise<number>;
   exists?(filter: FilterInput, options?: QueryOptions): Promise<boolean | { _id: unknown } | null>;
   distinct?<T = unknown>(field: string, filter?: FilterInput, options?: QueryOptions): Promise<T[]>;
-  findAll?(filter?: FilterInput, options?: QueryOptions): Promise<TDoc[]>;
+  findAll?(filter?: FilterInput, options?: FindAllOptions): Promise<TDoc[]>;
   /**
    * Atomic "look up by filter, insert `data` if missing, return the doc."
    *
