@@ -42,6 +42,7 @@ export {
   type PluginType,
   validatePluginOrder,
 } from './plugin-types.js';
+export { type PurgePort, runChunkedPurge, type WritingPurgeStrategy } from './purge.js';
 export type {
   AggCacheOptions,
   AggDateBucket,
@@ -70,9 +71,14 @@ export type {
   KeysetAggPaginationResult,
   MinimalRepo,
   PaginationParams,
+  PurgeRetryPolicy,
   QueryOptions,
   RepositorySession,
   StandardRepo,
+  TenantPurgeOptions,
+  TenantPurgeProgress,
+  TenantPurgeResult,
+  TenantPurgeStrategy,
   UpdateManyResult,
   WriteOptions,
 } from './types.js';

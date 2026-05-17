@@ -154,6 +154,13 @@ export interface ConformanceFeatures {
   getOrCreate: boolean;
   /** `count(filter)` and `exists(filter)`. */
   countAndExists: boolean;
+  /**
+   * `purgeByField(field, value, strategy, options)` — compliance-grade
+   * tenant cleanup primitive. Both mongokit and sqlitekit ship this as
+   * of repo-core 0.x. Future kits without it leave the flag absent
+   * (defaults to false) and skip the cleanup scenarios.
+   */
+  purgeByField?: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────────
