@@ -4,6 +4,56 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-17
+
+### Added — compliance-grade tenant cleanup primitive
+
+Cross-kit foundation for "what happens to this data on org-delete?" —
+GDPR right-to-be-forgotten, SOC 2 deletion timelines, HIPAA / PCI
+retention rules. Every kit (mongokit, sqlitekit, future pgkit) gets
+the same surface; arc's `cascadeDeleteForOrganization` runner composes
+on top.
+
+- **`StandardRepo.purgeByField?(field, value, strategy, options)`** — new optional method. Processes every row matching `field = value` under a declared strategy, chunked under the hood. Optional because not every store needs the surface; arc's cascade runner checks for the method at boot.
+- **`TenantPurgeStrategy`** discriminated union — four variants:
+  - `{ type: 'hard' }` — permanent removal (GDPR right-to-be-forgotten).
+  - `{ type: 'soft', deletedField?, deletedAtField? }` — recoverable; pairs with TTL indexes for eventual hard-purge.
+  - `{ type: 'anonymize', fields }` — retain rows but overwrite declared fields (HIPAA / PCI / SOX-compatible).
+  - `{ type: 'skip', reason }` — explicit opt-out with **mandatory** `reason` (compliance forcing function — silent skips are leaks).
+- **`TenantPurgeOptions`** — `batchSize`, `session`, `onProgress`, `signal`. Chunking is mandatory (10M-row tenants can't run as a single `deleteMany`); abort signal is checked between chunks (never mid-write); aborted runs return `ok: false` with cumulative `processed` count (at-least-once cleanup semantics).
+- **`TenantPurgeResult`** + **`TenantPurgeProgress`** — typed result envelope + per-chunk progress event.
+
+### Added — kit-agnostic orchestrator (`runChunkedPurge`)
+
+The chunk-loop logic — abort handling, progress emission, error-wrapping into result envelope, natural-exit on non-full batch — is identical across kits. Extracting it here means a single bug fix lands for every kit, and the surface a new kit has to implement shrinks to ~80 lines.
+
+- **`runChunkedPurge(strategy, options, port)`** — pure orchestrator (130 lines, no I/O).
+- **`PurgePort`** interface — the driving port. Each kit implements two closures: `selectChunkIds(limit)` + `applyStrategy(ids, strategy)`.
+- **`WritingPurgeStrategy`** — strategy union with `skip` excluded (orchestrator handles `skip` before the port is consulted, so ports only see `hard` / `soft` / `anonymize`).
+
+Hexagonal pattern: orchestrator is the use-case, `PurgePort` is the driving port, each kit's port factory is the adapter. Adding a new strategy (e.g. `archive`) = one union member + one case per port. Adding a new kit = one port file + ~10-line method.
+
+### Added — 8 cross-kit conformance scenarios
+
+In `src/testing/conformance.ts`, gated by the new `ConformanceFeatures.purgeByField?: boolean` flag. When both mongokit and sqlitekit pass the same scenarios, cross-kit byte-stability for tenant cleanup is provable:
+
+1. `hard` removes every matching row, leaves others intact
+2. `hard` empty match → `processed: 0`, `ok: true`
+3. `anonymize` overwrites declared fields, keeps the row
+4. `skip` is a no-op, returns reason
+5. Chunking: `batchSize` honored, `onProgress` fires per chunk
+6. Idempotent: re-running on the same tenant is a no-op
+7. Scoping: only matching rows affected (cross-tenant safety)
+8. Abort signal: stops between chunks, returns partial count + `ok: false`
+
+The `soft` strategy is intentionally NOT in the conformance suite — it requires writable `deleted` / `deletedAt` fields not present on the shared `ConformanceDoc`; each kit covers `soft` in its own integration tests.
+
+### Migration notes
+
+- **Existing kits:** the new method is optional — kits don't break. mongokit 3.14.0 and sqlitekit 0.4.0 ship implementations; older kit versions continue to work, they just can't honor a `purgeByField` call.
+- **Existing hosts:** no breaking changes. Hosts using arc's `cascadeDeleteForOrganization` automatically pick up the new strategy surface once arc 2.16.0 lands.
+- **Build sync (workspace dev):** kits need `cp -r dist/* ../mongokit/node_modules/@classytic/repo-core/dist/` etc. after a workspace bump until npm publish.
+
 ## [0.4.0] - 2026-05-04
 
 ### Added — kit-shared building blocks (consolidation)

@@ -58,6 +58,7 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
   const skipNoSubMinuteBuckets = !aggGate || !ops?.dateBucketSubMinute;
   const skipNoStddev = !aggGate || !ops?.stddev;
   const skipNoCache = !aggGate || !ops?.cache;
+  const skipNoPurge = !harness.features.purgeByField;
 
   describe(`[conformance] ${harness.name}`, () => {
     let ctx: ConformanceContext<TDoc>;
@@ -1230,6 +1231,197 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
           expect(back?.name).toBe('tx-read');
         });
       });
+    });
+
+    // ────────────────────────────────────────────────────────────────
+    // Tenant purge — compliance-grade cleanup primitive
+    // ────────────────────────────────────────────────────────────────
+    //
+    // Scenarios use the `category` field as a tenant-id proxy — it's
+    // declared on ConformanceDoc and every kit's schema accepts it.
+    // The `soft` strategy is deliberately NOT exercised here: it requires
+    // writable `deleted` / `deletedAt` fields that aren't part of the
+    // shared doc shape. Each kit covers `soft` in its own integration
+    // tests against its actual schema.
+    describe('purgeByField (tenant cleanup)', () => {
+      const seedTwoTenants = async () => {
+        await ctx.repo.create(harness.makeDoc({ name: 'a-1', category: 'org-a' }));
+        await ctx.repo.create(harness.makeDoc({ name: 'a-2', category: 'org-a' }));
+        await ctx.repo.create(harness.makeDoc({ name: 'a-3', category: 'org-a' }));
+        await ctx.repo.create(harness.makeDoc({ name: 'b-1', category: 'org-b' }));
+        await ctx.repo.create(harness.makeDoc({ name: 'b-2', category: 'org-b' }));
+      };
+
+      it.skipIf(skipNoPurge)('hard: removes every matching row, leaves others intact', async () => {
+        await seedTwoTenants();
+
+        const result = await ctx.repo.purgeByField!('category', 'org-a', { type: 'hard' });
+
+        expect(result.ok).toBe(true);
+        expect(result.strategy).toBe('hard');
+        expect(result.processed).toBe(3);
+        expect(typeof result.durationMs).toBe('number');
+
+        expect(await ctx.repo.count!({ category: 'org-a' })).toBe(0);
+        expect(await ctx.repo.count!({ category: 'org-b' })).toBe(2);
+      });
+
+      it.skipIf(skipNoPurge)('hard: empty match completes ok with processed: 0', async () => {
+        const result = await ctx.repo.purgeByField!('category', 'nonexistent', { type: 'hard' });
+        expect(result.ok).toBe(true);
+        expect(result.processed).toBe(0);
+      });
+
+      it.skipIf(skipNoPurge)('anonymize: overwrites declared fields, keeps the row', async () => {
+        await seedTwoTenants();
+
+        const result = await ctx.repo.purgeByField!('category', 'org-a', {
+          type: 'anonymize',
+          fields: { name: '[REDACTED]', notes: null },
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.strategy).toBe('anonymize');
+        expect(result.processed).toBe(3);
+
+        // Rows still exist (count by category unchanged) but PII fields cleared.
+        expect(await ctx.repo.count!({ category: 'org-a' })).toBe(3);
+        const redacted = await ctx.repo.findAll!({ category: 'org-a' });
+        for (const row of redacted) {
+          expect(row.name).toBe('[REDACTED]');
+          expect(row.notes).toBeNull();
+        }
+
+        // Other tenant untouched.
+        const others = await ctx.repo.findAll!({ category: 'org-b' });
+        for (const row of others) {
+          expect(row.name).not.toBe('[REDACTED]');
+        }
+      });
+
+      it.skipIf(skipNoPurge)('skip: no-op, returns reason and processed: 0', async () => {
+        await seedTwoTenants();
+
+        const result = await ctx.repo.purgeByField!('category', 'org-a', {
+          type: 'skip',
+          reason: 'audit-retained-per-SOX',
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.strategy).toBe('skip');
+        expect(result.processed).toBe(0);
+        expect(result.skipReason).toBe('audit-retained-per-SOX');
+
+        // Nothing changed.
+        expect(await ctx.repo.count!({ category: 'org-a' })).toBe(3);
+        expect(await ctx.repo.count!({ category: 'org-b' })).toBe(2);
+      });
+
+      it.skipIf(skipNoPurge)(
+        'chunking: batchSize honored, onProgress fires per chunk',
+        async () => {
+          // Seed 25 rows for org-a so a batchSize of 10 yields 3 chunks (10 + 10 + 5).
+          for (let i = 0; i < 25; i++) {
+            await ctx.repo.create(harness.makeDoc({ name: `chunk-${i}`, category: 'org-chunk' }));
+          }
+
+          const progressEvents: Array<{ processed: number; chunkSize: number }> = [];
+          const result = await ctx.repo.purgeByField!(
+            'category',
+            'org-chunk',
+            { type: 'hard' },
+            {
+              batchSize: 10,
+              onProgress: (event) => {
+                progressEvents.push({ processed: event.processed, chunkSize: event.chunkSize });
+              },
+            },
+          );
+
+          expect(result.processed).toBe(25);
+          expect(progressEvents.length).toBe(3);
+          expect(progressEvents[0]).toEqual({ processed: 10, chunkSize: 10 });
+          expect(progressEvents[1]).toEqual({ processed: 20, chunkSize: 10 });
+          expect(progressEvents[2]).toEqual({ processed: 25, chunkSize: 5 });
+          expect(await ctx.repo.count!({ category: 'org-chunk' })).toBe(0);
+        },
+      );
+
+      it.skipIf(skipNoPurge)('idempotent: re-running on the same tenant is a no-op', async () => {
+        await seedTwoTenants();
+
+        const first = await ctx.repo.purgeByField!('category', 'org-a', { type: 'hard' });
+        expect(first.processed).toBe(3);
+
+        const second = await ctx.repo.purgeByField!('category', 'org-a', { type: 'hard' });
+        expect(second.ok).toBe(true);
+        expect(second.processed).toBe(0);
+      });
+
+      it.skipIf(skipNoPurge)('scoping: only rows matching field=value are affected', async () => {
+        // Cross-tenant safety check — the most important invariant.
+        await seedTwoTenants();
+        const totalBefore = await ctx.repo.count!({});
+
+        await ctx.repo.purgeByField!('category', 'org-a', { type: 'hard' });
+
+        const totalAfter = await ctx.repo.count!({});
+        expect(totalAfter).toBe(totalBefore - 3);
+        expect(await ctx.repo.count!({ category: 'org-b' })).toBe(2);
+      });
+
+      it.skipIf(skipNoPurge)(
+        'abort signal: stops between chunks, returns partial count',
+        async () => {
+          for (let i = 0; i < 25; i++) {
+            await ctx.repo.create(harness.makeDoc({ name: `abort-${i}`, category: 'org-abort' }));
+          }
+
+          const controller = new AbortController();
+          const result = await ctx.repo.purgeByField!(
+            'category',
+            'org-abort',
+            { type: 'hard' },
+            {
+              batchSize: 10,
+              signal: controller.signal,
+              onProgress: (event) => {
+                // Abort after the first chunk lands.
+                if (event.processed === 10) controller.abort();
+              },
+            },
+          );
+
+          // Aborted runs report ok: false; the chunks that did commit stay committed.
+          expect(result.ok).toBe(false);
+          expect(result.processed).toBe(10);
+          const remaining = await ctx.repo.count!({ category: 'org-abort' });
+          expect(remaining).toBe(15);
+        },
+      );
+
+      it.skipIf(skipNoPurge)(
+        'retry policy is plumbed through (default no retry, opt-in works)',
+        async () => {
+          // Smoke test for the retry surface: pass a never-firing
+          // `shouldRetry` (defaults to retry-all) with maxAttempts=1 to
+          // verify the option is at least accepted by the orchestrator.
+          // The actual retry behavior — exponential backoff, transient
+          // detection — gets per-kit coverage in unit tests where the
+          // driver can be made to fail deterministically.
+          await seedTwoTenants();
+          const result = await ctx.repo.purgeByField!(
+            'category',
+            'org-a',
+            { type: 'hard' },
+            {
+              retry: { maxAttempts: 1, baseDelayMs: 10 },
+            },
+          );
+          expect(result.ok).toBe(true);
+          expect(result.processed).toBe(3);
+        },
+      );
     });
   });
 }

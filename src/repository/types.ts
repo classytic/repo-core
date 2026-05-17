@@ -139,6 +139,142 @@ export interface FindOneAndUpdateOptions extends QueryOptions {
   upsert?: boolean;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Tenant purge — compliance-grade cleanup primitive
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Strategy for processing rows matched by a tenant/scope field — the
+ * decision every multi-tenant host makes when an organization (or any
+ * tenant) is deleted. Each variant maps to a kit-native primitive;
+ * arc's `createOrgDeleteCascade` orchestrates the per-resource declarations.
+ *
+ * **Why a discriminated union (not an enum)**: each strategy carries
+ * its own arguments — `fields` for anonymize, `reason` for skip. The
+ * union forces callers to supply them at the type level rather than
+ * fail at runtime.
+ *
+ * **Compliance shapes covered**:
+ * - `hard` — GDPR right-to-be-forgotten, SOC 2 deletion timelines.
+ * - `soft` — recoverable deletes within audit retention windows; pairs
+ *   with TTL indexes (MongoDB `expireAfterSeconds` on `deletedAt`) for
+ *   eventual hard-purge.
+ * - `anonymize` — records that legally must outlive the tenant (audit
+ *   ledgers, financial records, medical history) but must lose PII
+ *   linkage. HIPAA / PCI / SOX-compatible.
+ * - `skip` — explicitly opt out, with a mandatory `reason` that surfaces
+ *   in audit reports.
+ */
+export type TenantPurgeStrategy =
+  /**
+   * Permanently remove every matching row.
+   */
+  | { type: 'hard' }
+  /**
+   * Mark every matching row as deleted via the soft-delete convention.
+   * Pair with `softDeletePlugin` or a TTL index for eventual cleanup.
+   */
+  | {
+      type: 'soft';
+      /** Boolean flag field set to `true`. Default `'deleted'`. */
+      deletedField?: string;
+      /** Timestamp field set to purge-time. Default `'deletedAt'`. */
+      deletedAtField?: string;
+    }
+  /**
+   * Retain every matching row but overwrite the declared fields. Field
+   * values can be static (preferred — statically inspectable for audit)
+   * or per-row functions when deterministic transforms are needed
+   * (hashing, derived identifiers).
+   */
+  | {
+      type: 'anonymize';
+      fields: Record<string, unknown | ((doc: Record<string, unknown>) => unknown)>;
+    }
+  /**
+   * Take no action. `reason` is required — an undocumented skip is a
+   * silent compliance leak. Surfaces in audit reports + introspection.
+   */
+  | { type: 'skip'; reason: string };
+
+/**
+ * Per-call options for `purgeByField`. Chunking is required for
+ * correctness on large tenant datasets; the kit implementation MUST
+ * honor `batchSize` to avoid OOM / lock contention.
+ */
+export interface TenantPurgeOptions {
+  /** Rows per batch. Default kit-specific (typically 1000). */
+  batchSize?: number;
+  /** Driver session for transactional callers. */
+  session?: RepositorySession;
+  /** Per-chunk progress callback. `processed` is cumulative. */
+  onProgress?: (event: TenantPurgeProgress) => void | Promise<void>;
+  /**
+   * Abort signal. Kits MUST check between chunks and finalize with the
+   * cumulative `processed` count when aborted (no rollback — chunks
+   * already committed remain committed; this is at-least-once cleanup).
+   */
+  signal?: AbortSignal;
+  /**
+   * Retry transient chunk-level failures (network blips, write
+   * conflicts, busy-locks). Default `undefined` → no retry: first
+   * chunk error aborts the run. Hosts opt in for robustness:
+   *
+   * ```ts
+   * retry: {
+   *   maxAttempts: 3,         // default 3 when block present
+   *   baseDelayMs: 100,       // exponential: 100ms, 200ms, 400ms
+   *   shouldRetry: (err) =>   // optional: narrow retry to transient
+   *     /WriteConflict|SQLITE_BUSY|ECONNRESET/i.test(String(err)),
+   * }
+   * ```
+   *
+   * The retry happens at the CHUNK level — already-committed chunks
+   * stay committed. A retry that eventually succeeds reports `ok: true`;
+   * one that exhausts `maxAttempts` aborts with the underlying error.
+   */
+  retry?: PurgeRetryPolicy;
+}
+
+/**
+ * Retry policy for `purgeByField` chunk-level failures. See
+ * `TenantPurgeOptions.retry` for the full contract.
+ */
+export interface PurgeRetryPolicy {
+  /** Max attempts per chunk (including the first try). Default 3. */
+  maxAttempts?: number;
+  /** Base delay (ms) for exponential backoff. Default 100ms. */
+  baseDelayMs?: number;
+  /** Decide whether a given error is transient. Default: retry every error. */
+  shouldRetry?: (err: unknown, attempt: number) => boolean;
+}
+
+/** Chunk-level progress event for `purgeByField`. */
+export interface TenantPurgeProgress {
+  /** Rows processed so far (cumulative across chunks). */
+  processed: number;
+  /** Rows in the chunk that just completed. */
+  chunkSize: number;
+  /** Wall-clock ms elapsed since the call started. */
+  elapsedMs: number;
+}
+
+/** Final result of a `purgeByField` invocation. */
+export interface TenantPurgeResult {
+  /** Strategy that actually executed (echoes input.type). */
+  strategy: TenantPurgeStrategy['type'];
+  /** Total rows processed (0 for `skip`). */
+  processed: number;
+  /** True iff the call completed without abort / error. */
+  ok: boolean;
+  /** Wall-clock ms. */
+  durationMs: number;
+  /** First error if `ok: false`. Kits abort the run on a chunk failure. */
+  error?: { message: string; chunkOffset: number };
+  /** Echoed for `skip` strategy. Undefined for other strategies. */
+  skipReason?: string;
+}
+
 /**
  * Transition spec for `StandardRepo.claim()` — a CAS state change.
  *
@@ -1435,6 +1571,62 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    * **Promoted from optional to required in repo-core 0.2.0.**
    */
   deleteMany(filter: FilterInput, options?: DeleteOptions): Promise<DeleteManyResult>;
+
+  /**
+   * Compliance-grade cleanup primitive — processes every row matching
+   * `field = value` under the given strategy. Powers tenant-scoped
+   * data cleanup (org delete → cascade across every multi-tenant
+   * resource) without forcing each consumer to hand-roll `deleteMany`
+   * + chunking + audit + idempotency.
+   *
+   * Strategy → kit-native primitive:
+   * - `hard`      → chunked `deleteMany({ [field]: value })`
+   * - `soft`      → chunked `updateMany` setting deleted/deletedAt
+   * - `anonymize` → chunked `updateMany` applying the field map per-row
+   * - `skip`      → no-op; `result.skipReason` echoes the declared reason
+   *
+   * **Chunking is mandatory.** Implementations MUST honor `batchSize`
+   * — a 10M-row tenant cleanup can't run as a single `deleteMany`
+   * (lock contention, oplog blowup, replication lag). Kits process
+   * rows in chunks of `batchSize` (default ~1000) and emit per-chunk
+   * `onProgress` events.
+   *
+   * **Index requirement — load-bearing for tractability.** The store
+   * MUST have an index leading with `field` (single-field
+   * `{ [field]: 1 }`, or a compound index whose first column is
+   * `field`). Without it, every chunk's selection runs a full
+   * collection / table scan — purge becomes O(n²) on large tenants
+   * and can lock the table for minutes. Verify before shipping:
+   *   - mongo: `db.coll.getIndexes()` shows an index keyed on `field`.
+   *   - sqlite: `EXPLAIN QUERY PLAN SELECT … WHERE field = ?` shows
+   *     `SEARCH … USING INDEX`, never `SCAN`.
+   *
+   * **Idempotent.** Re-running with the same arguments is safe — rows
+   * already deleted/anonymized simply don't match the next pass.
+   * Crucial for at-least-once cascade workers that may retry after
+   * partial failure.
+   *
+   * **Plugin composition.** Kits route the underlying chunked ops
+   * through their standard `before:deleteMany` / `before:updateMany`
+   * hooks so audit / cache-invalidation / observability plugins fire
+   * naturally — no separate `before:purgeByField` hook is required.
+   *
+   * **Optional method.** Kits without bulk-cleanup needs leave this
+   * undefined. Arc's `createOrgDeleteCascade` checks for the method
+   * at boot and emits a clear error naming the offending resource if
+   * a tenant-flagged resource's repo lacks it.
+   *
+   * @param field  Document field to match against (e.g. `'organizationId'`).
+   * @param value  Value the field must equal (e.g. the deleted org id).
+   * @param strategy  Strategy declaration — see {@link TenantPurgeStrategy}.
+   * @param options  Chunking, session, progress, abort signal.
+   */
+  purgeByField?(
+    field: string,
+    value: unknown,
+    strategy: TenantPurgeStrategy,
+    options?: TenantPurgeOptions,
+  ): Promise<TenantPurgeResult>;
 
   /**
    * Heterogeneous bulk write. Stays optional — kits dispatch each op
