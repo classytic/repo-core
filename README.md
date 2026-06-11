@@ -62,6 +62,19 @@ import { CORE_OP_REGISTRY, describe } from '@classytic/repo-core/operations';
 
 // Repository hook context type (for plugin authors).
 import type { RepositoryContext } from '@classytic/repo-core/context';
+
+// Capabilities + resilience (0.6.0) — runtime feature detection, the unified
+// retry/abort primitives, and the change-feed contract types.
+import { withRetry, throwIfAborted } from '@classytic/repo-core/repository';
+import type { RepoCapabilities, RetryPolicy, ChangeEvent, WatchOptions } from '@classytic/repo-core/repository';
+
+// Domain events (0.6.0) — pass `events: { transport }` at construction and every
+// mutating op publishes `<resource>.<verb>` through any arc-compatible transport.
+import type { RepositoryEventPublisher, DomainEvent } from '@classytic/repo-core/events';
+
+// Standard Schema validation (0.6.0) — `schema` / `updateSchema` construction
+// options accept any Zod / Valibot / ArkType / Effect schema.
+import { validateStandardSchema, type StandardSchemaV1 } from '@classytic/repo-core/schema';
 ```
 
 **There is no `.` / root entry.** Import from the exact subpath — that's the contract that keeps tree-shaking honest.
@@ -143,6 +156,51 @@ export function stampOrgId(orgId: string): Plugin {
 
 Typos like `'before:craete'` become compile errors. Subscribing to an event a given kit doesn't emit is a silent no-op (that's how the hook engine works), so a plugin can safely wire listeners for the full standard set.
 
+## Capabilities — feature detection, not runtime surprises
+
+Every kit declares `readonly capabilities: RepoCapabilities` (required on
+`StandardRepo` since 0.6.0). Kit-portable hosts branch once at boot:
+
+```ts
+if (!repo.capabilities.arrayOperators) {
+  // SQL kit without JSON array rewrites — model tags as a join table
+}
+if (repo.capabilities.aggregateOps?.percentile) {
+  dashboard.enableLatencyPercentiles();
+}
+```
+
+The conformance suite's `ConformanceFeatures` is an alias of the same type —
+what a kit declares at runtime is exactly what the cross-kit suite verifies.
+
+## Config-driven validation + events (0.6.0)
+
+`RepositoryBaseOptions` follows media-kit's config-driven activation: pass the
+slot and the feature lights up; omit it and the wiring is inert.
+
+```ts
+import { z } from 'zod';
+
+const repo = createRepository(UserModel, {
+  // Any Standard Schema validator — Zod, Valibot, ArkType, Effect.
+  schema: z.object({ name: z.string().min(1), email: z.string().email() }),
+  updateSchema: z.object({ name: z.string().min(1) }).partial(),
+
+  // Any arc / primitives-compatible EventTransport. Every mutating op then
+  // publishes `user.created` / `user.updated` / `user.deleted` / ...
+  events: { transport: redisTransport, source: 'commerce' },
+});
+```
+
+Validation runs at `HOOK_PRIORITY.VALIDATION` (150) — after policy plugins
+(tenant-stamped fields are present), before cache. Event publishing never
+fails the operation; transport failures route to the `error:events` hook.
+
+> **Warning — arc hosts:** these are the same event names `@classytic/arc`'s
+> `eventStrategy: 'auto'` emits. Wiring BOTH the repo-level bridge and arc
+> auto events for one resource double-publishes silently (arc's dual-publish
+> dev-warn cannot see the repo layer). Pick one layer per resource.
+
 ## Typed result extras
 
 ```ts
@@ -161,11 +219,15 @@ Default `TExtra` is `Record<string, never>` — `OffsetPaginationResult<User>` b
 
 ## Status
 
-**v0.3.0 — canonical contracts release.** Pagination types + wire envelope, tenant config, error contracts, and the `SchemaGenerator<TModel>` interface relocated from primitives / mongokit / arc to single sources of truth here.
+**v0.6.0 — standardization release.** Required `RepoCapabilities` feature
+detection (unified with `ConformanceFeatures`), Standard Schema validation
+slot, domain-event emission (`/events`), `watch()` change-feed contract,
+unified `RetryPolicy` + `signal` cancellation, and `recordToFilter`
+promoted from per-kit copies.
 
 Consumed by:
-- `@classytic/mongokit` ≥ 3.12 — `Repository extends RepositoryBase`; hook engine, plugin-order validator, `HOOK_PRIORITY` sourced from repo-core. Pagination + `HttpError` types now flow from repo-core (mongokit's local copies dropped). `MultiTenantOptions extends Pick<TenantConfig, ...>`. `buildCrudSchemasFromModel` ships a compile-time `SchemaGenerator<TModel>` conformance assertion. Mongokit's own `QueryParser` remains standalone.
-- `@classytic/sqlitekit` ≥ 0.2 — `SqliteRepository extends RepositoryBase`; Filter IR compiled to Drizzle / raw SQL natively. `MultiTenantOptions extends Pick<TenantConfig, ...>`. `buildCrudSchemasFromTable` ships the same `SchemaGenerator` conformance assertion.
+- `@classytic/mongokit` ≥ 3.16 — `Repository extends RepositoryBase`; declares `MONGOKIT_CAPABILITIES`; implements `watch()` via change streams; hook engine, plugin-order validator, `HOOK_PRIORITY`, pagination + `HttpError` types all flow from repo-core. Mongokit's own `QueryParser` remains standalone.
+- `@classytic/sqlitekit` ≥ 0.6 — `SqliteRepository extends RepositoryBase`; declares `SQLITEKIT_CAPABILITIES`; Filter IR compiled to Drizzle / raw SQL natively; `recordToFilter` consumed from here.
 - `@classytic/arc` ≥ 2.12 — adapters typed against `SchemaGenerator<TModel>`; `ArcError implements HttpError`; pagination wire envelope (`method` discriminant) emitted via `toCanonicalList()` with `reply.sendList()`.
 
 See [INFRA.md](./INFRA.md) for the architectural principles, subpath map, build/tooling decisions, and the roadmap for pgkit / prismakit.

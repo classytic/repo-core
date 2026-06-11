@@ -11,8 +11,14 @@
  * compose identically.
  */
 export const HOOK_PRIORITY = {
-  /** Policy enforcement — tenant isolation, soft-delete filtering, validation. */
+  /** Policy enforcement — tenant isolation, soft-delete filtering. */
   POLICY: 100,
+  /**
+   * Input validation — Standard Schema / custom validators. Runs after
+   * policy (so tenant-stamped fields are present on the payload) and
+   * before cache (an invalid request must never claim a cache slot).
+   */
+  VALIDATION: 150,
   /** Cache lookup / store — must run after policy so filters are in the key. */
   CACHE: 200,
   /** Observability — audit logging, metrics, telemetry. Must not mutate context. */

@@ -11,7 +11,10 @@
  * full cross-backend surface.
  */
 
+import type { AggregateOpsSupport, RepoCapabilities } from '../repository/capabilities.js';
 import type { MinimalRepo, StandardRepo } from '../repository/types.js';
+
+export type { AggregateOpsSupport };
 
 // ──────────────────────────────────────────────────────────────────────
 // Shared conformance document shape
@@ -48,120 +51,18 @@ export interface ConformanceDoc {
 // ──────────────────────────────────────────────────────────────────────
 
 /**
- * Per-aggregate-op support matrix. Some aggregate ops aren't
- * portable across every backend — `percentile` requires Mongo 7+'s
- * `$percentile` accumulator or SQL's `PERCENTILE_CONT`, neither of
- * which sqlitekit ships. Scenarios that exercise a non-universal
- * op gate on the matching flag and `it.skip` on the off branch so
- * the suite runs cleanly across every environment.
+ * Per-backend feature flags — an alias of the runtime
+ * {@link RepoCapabilities} descriptor (one shape, no drift). Scenarios
+ * that exercise a non-universal capability (transactions in D1, upsert
+ * in narrow stores) check the flag and `it.skip` on the off branch — so
+ * the suite runs on every environment without "optional test failed"
+ * noise.
  *
- * **Stability contract.** Adding a flag here is additive — kits
- * that don't declare the new key default to `false`, which is the
- * conservative choice. Renaming or removing a flag is a breaking
- * change.
- *
- * **Naming convention.** Flag names match the IR field they gate
- * (`percentile` → `AggMeasure.op === 'percentile'`). When in doubt,
- * grep the IR types and use the same identifier.
+ * **Single source of truth.** Kits declare `repo.capabilities` at
+ * runtime and pass the SAME object as the harness's `features` — what a
+ * kit claims to support is exactly what the conformance suite verifies.
  */
-export interface AggregateOpsSupport {
-  /**
-   * `{ op: 'percentile', field, p }` measure. Mongokit (Mongo 7+)
-   * supports it; sqlitekit throws by design (no native function).
-   * Hosts targeting percentile dashboards pin to a kit that supports it.
-   */
-  percentile?: boolean;
-  /**
-   * `{ op: 'stddev', field }` / `{ op: 'stddevPop', field }` measures.
-   * Mongokit supports both via native `$stdDevSamp` / `$stdDevPop`
-   * (Welford). Sqlitekit throws — SQLite has no native STDDEV and
-   * the computational formula is numerically unstable. Hosts pin
-   * to mongokit / future pgkit when stddev is load-bearing.
-   */
-  stddev?: boolean;
-  /**
-   * `topN: { partitionBy, sortBy, limit, ties }` filter. Both
-   * mongokit and sqlitekit support it as of repo-core 0.4.x; the
-   * flag exists for future kits that may not ship window-function
-   * equivalents.
-   */
-  topN?: boolean;
-  /**
-   * `dateBuckets: { ..., interval: { every, unit } }` custom-bin
-   * form. Kits that only support named-bucket form can leave this
-   * `false`; tests for `'minute'` / `'hour'` named intervals are
-   * gated separately via `dateBucketSubMinute`.
-   */
-  customDateBuckets?: boolean;
-  /**
-   * Sub-day-granularity named buckets (`'minute'` / `'hour'`).
-   * Older kits may only support day+ named intervals; flag exists
-   * to gate those scenarios cleanly.
-   */
-  dateBucketSubMinute?: boolean;
-  /**
-   * Per-request `cache?: AggCacheOptions` slot — TTL / tags / SWR /
-   * bypass / `repo.invalidateAggregateCache(tags)`. Both mongokit
-   * and sqlitekit support it as of repo-core 0.4.x. Future kits
-   * without the wiring can leave this false to skip cache scenarios.
-   *
-   * Independent of which CACHE BACKEND the harness wires — test
-   * scenarios construct their own `createMemoryCacheAdapter()` so
-   * this flag is purely "does the kit honour the request slot".
-   */
-  cache?: boolean;
-}
-
-/**
- * Per-backend feature flags. Scenarios that exercise a non-universal
- * capability (transactions in D1, upsert in narrow stores) check the
- * flag and `it.skip` on the off branch — so the suite runs on every
- * environment without "optional test failed" noise.
- */
-export interface ConformanceFeatures {
-  /** `withTransaction(fn)` — D1 throws, standalone Mongo throws 263. */
-  transactions: boolean;
-  /**
-   * True if calling `withTransaction` inside another `withTransaction`
-   * callback is expected to work. Mongo's driver supports it via the
-   * same session; SQL drivers typically reject it. Either behavior is
-   * valid — the scenario asserts whichever the harness declares.
-   */
-  nestedTransactions: boolean;
-  /** `findOneAndUpdate` with upsert: true. */
-  upsert: boolean;
-  /** `isDuplicateKeyError(err)` classifier. */
-  duplicateKeyError: boolean;
-  /** `distinct(field)`. */
-  distinct: boolean;
-  /**
-   * Portable `aggregate({ measures, groupBy, having })`. Coarse
-   * top-level flag — gates the entire `describe('aggregate')` block.
-   * Per-op flags live on `aggregateOps` for asymmetric capabilities
-   * (percentile, custom date bins, etc.) that some kits skip while
-   * still supporting the core aggregate surface.
-   */
-  aggregate: boolean;
-  /**
-   * Per-op feature matrix for the aggregate surface. Optional —
-   * absent matrix or absent key both mean "not supported", so kits
-   * opt INTO scenarios for ops they implement. This avoids the
-   * trap where a future kit silently fails percentile tests because
-   * it forgot to set the flag.
-   */
-  aggregateOps?: AggregateOpsSupport;
-  /** `getOrCreate(filter, data)`. */
-  getOrCreate: boolean;
-  /** `count(filter)` and `exists(filter)`. */
-  countAndExists: boolean;
-  /**
-   * `purgeByField(field, value, strategy, options)` — compliance-grade
-   * tenant cleanup primitive. Both mongokit and sqlitekit ship this as
-   * of repo-core 0.x. Future kits without it leave the flag absent
-   * (defaults to false) and skip the cleanup scenarios.
-   */
-  purgeByField?: boolean;
-}
+export type ConformanceFeatures = RepoCapabilities;
 
 // ──────────────────────────────────────────────────────────────────────
 // Harness contract

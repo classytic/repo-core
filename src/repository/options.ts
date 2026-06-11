@@ -40,6 +40,10 @@
  *   boundary.
  * - `requestId` — request correlation id for trace stitching across
  *   logs, events, and downstream service calls.
+ * - `traceId` — distributed-tracing trace id (W3C traceparent /
+ *   OpenTelemetry). Observability plugins read it to join repo spans
+ *   onto the host's trace; distinct from `requestId`, which is the
+ *   host's own correlation id and may outlive a single trace.
  *
  * Frameworks should treat this set as the canonical forward list:
  * peel matching keys off the request context, drop them into the
@@ -52,6 +56,7 @@ export const STANDARD_REPO_OPTION_KEYS = [
   'user',
   'session',
   'requestId',
+  'traceId',
 ] as const;
 
 /**

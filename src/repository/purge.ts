@@ -18,6 +18,7 @@
  * the driving port; each kit's port factory is the adapter.
  */
 
+import { withRetry } from './resilience.js';
 import type { TenantPurgeOptions, TenantPurgeResult, TenantPurgeStrategy } from './types.js';
 
 /**
@@ -59,30 +60,6 @@ export interface PurgePort {
    * signal — saves one round-trip on the last chunk.
    */
   purgeChunk(strategy: WritingPurgeStrategy, limit: number): Promise<number>;
-}
-
-/**
- * Retry hook for transient chunk-level failures. Default: no retry
- * (preserves the original "abort the run on first error" semantic for
- * hosts that haven't opted in).
- *
- * **Don't retry blindly.** Validation errors, schema errors, permission
- * errors are NOT transient — retrying just delays the same failure.
- * Network blips, write conflicts (Mongo `WriteConflict`), busy-locks
- * (SQLite `SQLITE_BUSY`), connection resets ARE transient — backoff +
- * retry recovers.
- */
-export interface PurgeRetryPolicy {
-  /** Max attempts per chunk (including the first try). Default 3 when retry block present. */
-  maxAttempts?: number;
-  /** Base delay (ms) for exponential backoff. Default 100ms; doubles each attempt. */
-  baseDelayMs?: number;
-  /**
-   * Decide whether a given error is transient. Default: retry every
-   * error (assume transient). Hosts pass a stricter predicate when they
-   * know their driver's error taxonomy.
-   */
-  shouldRetry?: (err: unknown, attempt: number) => boolean;
 }
 
 /**
@@ -134,7 +111,13 @@ export async function runChunkedPurge(
         };
       }
 
-      const chunkSize = await runChunkWithRetry(() => port.purgeChunk(strategy, batchSize), retry);
+      // Signal flows into withRetry so an abort fired during retry
+      // backoff stops before the next attempt — not just between chunks.
+      const chunkSize = await withRetry(
+        () => port.purgeChunk(strategy, batchSize),
+        retry,
+        options.signal,
+      );
       if (chunkSize === 0) break;
 
       processed += chunkSize;
@@ -170,33 +153,4 @@ export async function runChunkedPurge(
     ok: true,
     durationMs: Date.now() - start,
   };
-}
-
-/**
- * Run `fn` with exponential backoff when retry is enabled. Falls through
- * to a single attempt when `retry` is undefined (default behavior).
- */
-async function runChunkWithRetry<T>(
-  fn: () => Promise<T>,
-  retry: PurgeRetryPolicy | undefined,
-): Promise<T> {
-  if (!retry) return fn();
-
-  const maxAttempts = retry.maxAttempts ?? 3;
-  const baseDelayMs = retry.baseDelayMs ?? 100;
-  const shouldRetry = retry.shouldRetry ?? (() => true);
-
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (attempt === maxAttempts - 1) break;
-      if (!shouldRetry(err, attempt + 1)) break;
-      // Exponential backoff: baseDelayMs * 2^attempt (100ms / 200ms / 400ms / …).
-      await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }

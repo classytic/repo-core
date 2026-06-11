@@ -14,6 +14,7 @@ export default defineConfig({
     'query-parser/index': 'src/query-parser/index.ts',
     'context/index': 'src/context/index.ts',
     'cache/index': 'src/cache/index.ts',
+    'events/index': 'src/events/index.ts',
     'schema/index': 'src/schema/index.ts',
     'testing/index': 'src/testing/index.ts',
     'lookup/index': 'src/lookup/index.ts',

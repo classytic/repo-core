@@ -13,8 +13,10 @@
  */
 
 import type { RepositoryContext } from '../context/index.js';
+import { type RepositoryEventsOptions, registerRepositoryEvents } from '../events/emit.js';
 import type { HookListener, HookMode } from '../hooks/index.js';
-import { HookEngine } from '../hooks/index.js';
+import { HOOK_PRIORITY, HookEngine } from '../hooks/index.js';
+import { type StandardSchemaV1, validateStandardSchema } from '../schema/standard-schema.js';
 import { type PluginType, validatePluginOrder } from './plugin-types.js';
 
 /** Construction options common to every kit. */
@@ -29,6 +31,30 @@ export interface RepositoryBaseOptions {
   pluginOrderChecks?: 'warn' | 'throw' | 'off';
   /** Optional callback for plugin-order warnings (defaults to `console.warn`). */
   onPluginOrderWarning?: (message: string) => void;
+  /**
+   * Standard Schema validator (Zod 3.24+, Valibot 1+, ArkType 2+, ...) for
+   * write payloads. Validates `create` data and every `createMany` doc at
+   * `HOOK_PRIORITY.VALIDATION` — after policy plugins (tenant-stamped fields
+   * are present), before cache/observability. Failures throw an `HttpError`
+   * 400 with structured `validationErrors`.
+   *
+   * Validator output replaces the payload, so coercions/defaults declared in
+   * the schema flow into the write.
+   */
+  schema?: StandardSchemaV1;
+  /**
+   * Standard Schema validator for `update` payloads. Separate slot because
+   * updates are partial — derive one explicitly (`schema.partial()` in Zod)
+   * rather than having repo-core guess partial semantics per vendor.
+   */
+  updateSchema?: StandardSchemaV1;
+  /**
+   * Domain-event emission. Pass any arc / `@classytic/primitives`-compatible
+   * transport and every mutating op publishes `<resource>.<verb>` events
+   * (`user.created`, `user.updated`, ...). Omit and the wiring is inert.
+   * See `@classytic/repo-core/events` for naming + delivery semantics.
+   */
+  events?: RepositoryEventsOptions;
 }
 
 /**
@@ -65,6 +91,58 @@ export abstract class RepositoryBase {
       options.onPluginOrderWarning,
     );
     for (const plugin of plugins) this.use(plugin);
+
+    if (options.schema) this._registerSchemaValidation(options.schema, options.updateSchema);
+    if (options.events) registerRepositoryEvents(this, options.events);
+  }
+
+  /**
+   * Wire Standard Schema validation into the write lifecycle. Validator
+   * output replaces the payload so schema-declared coercions and defaults
+   * flow into the write.
+   */
+  private _registerSchemaValidation(
+    schema: StandardSchemaV1,
+    updateSchema: StandardSchemaV1 | undefined,
+  ): void {
+    const validation = { priority: HOOK_PRIORITY.VALIDATION };
+
+    this.on<RepositoryContext>(
+      'before:create',
+      async (context) => {
+        if (context.data === undefined) return;
+        context.data = (await validateStandardSchema(schema, context.data)) as Record<
+          string,
+          unknown
+        >;
+      },
+      validation,
+    );
+
+    this.on<RepositoryContext>(
+      'before:createMany',
+      async (context) => {
+        if (!Array.isArray(context.dataArray)) return;
+        context.dataArray = (await Promise.all(
+          context.dataArray.map((doc) => validateStandardSchema(schema, doc)),
+        )) as Record<string, unknown>[];
+      },
+      validation,
+    );
+
+    if (updateSchema) {
+      this.on<RepositoryContext>(
+        'before:update',
+        async (context) => {
+          if (context.data === undefined) return;
+          context.data = (await validateStandardSchema(updateSchema, context.data)) as Record<
+            string,
+            unknown
+          >;
+        },
+        validation,
+      );
+    }
   }
 
   /** Install a plugin (object with `apply(repo)` or a plain function). */

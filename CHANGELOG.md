@@ -4,6 +4,25 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-11
+
+Standardization release. Coordinated with mongokit 3.16 + sqlitekit 0.6.
+
+### Added
+
+- **`StandardRepo.capabilities: RepoCapabilities`** (required) — runtime feature detection (`arrayOperators`, `changeStreams`, `regexFilter`, `lean`, `streaming`, `lookupPopulate`, + conformance flags). `ConformanceFeatures` is now an alias of the same type — runtime declaration and conformance gating cannot drift.
+- **Standard Schema validation** — `RepositoryBaseOptions.schema` / `updateSchema` accept any Zod / Valibot / ArkType / Effect schema; runs at new `HOOK_PRIORITY.VALIDATION` (150). Failures throw `HttpError` 400 with `validationErrors`. Vendored `StandardSchemaV1` types + `validateStandardSchema()` on `/schema`.
+- **Domain events** (`/events` subpath) — `RepositoryBaseOptions.events: { transport }` publishes `<resource>.<verb>` events through any arc/primitives-compatible transport. Publish failures never fail the op (routed to `error:events`).
+- **Change feed contract** — optional `StandardRepo.watch?()` returning `AsyncIterable<ChangeEvent<TDoc>>`; gated by `capabilities.changeStreams`.
+- **Resilience** — `QueryOptions.signal` + `QueryOptions.retryPolicy`; shared `withRetry()` / `throwIfAborted()` helpers.
+- **`recordToFilter()`** on `/filter` — promoted from per-kit copies.
+- `STANDARD_REPO_OPTION_KEYS` gains `'traceId'`.
+
+### Changed
+
+- `PurgeRetryPolicy` → **`RetryPolicy`** (rename, identical shape; was declared twice — now once). Clean break, no alias.
+- `AggregateOpsSupport` moved to `repository/capabilities.ts` (still re-exported from `/testing`).
+
 ## [0.5.0] - 2026-05-17
 
 ### Added — compliance-grade tenant cleanup primitive
@@ -28,7 +47,7 @@ on top.
 The chunk-loop logic — abort handling, progress emission, error-wrapping into result envelope, natural-exit on non-full batch — is identical across kits. Extracting it here means a single bug fix lands for every kit, and the surface a new kit has to implement shrinks to ~80 lines.
 
 - **`runChunkedPurge(strategy, options, port)`** — pure orchestrator (130 lines, no I/O).
-- **`PurgePort`** interface — the driving port. Each kit implements two closures: `selectChunkIds(limit)` + `applyStrategy(ids, strategy)`.
+- **`PurgePort`** interface — the driving port. Each kit implements a single closure: `purgeChunk(strategy, limit)` — one method lets each driver pick its own round-trip shape (sqlite hard-strategy compiles to one `DELETE … LIMIT`; a two-method `selectChunkIds` + `applyStrategy` split would force 2 round-trips per chunk for every kit).
 - **`WritingPurgeStrategy`** — strategy union with `skip` excluded (orchestrator handles `skip` before the port is consulted, so ports only see `hard` / `soft` / `anonymize`).
 
 Hexagonal pattern: orchestrator is the use-case, `PurgePort` is the driving port, each kit's port factory is the adapter. Adding a new strategy (e.g. `archive`) = one union member + one case per port. Adding a new kit = one port file + ~10-line method.

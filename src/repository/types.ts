@@ -21,6 +21,8 @@ import type { Filter } from '../filter/types.js';
 import type { LookupPopulateOptions, LookupPopulateResult, LookupSpec } from '../lookup/types.js';
 import type { OffsetPaginationResult } from '../pagination/types.js';
 import type { UpdateInput } from '../update/types.js';
+import type { RepoCapabilities } from './capabilities.js';
+import type { RetryPolicy } from './resilience.js';
 
 // ──────────────────────────────────────────────────────────────────────
 // Filter input type
@@ -82,6 +84,18 @@ export interface QueryOptions {
   user?: Record<string, unknown>;
   /** Arc request context (orgId, roles, requestId, ...). */
   context?: Record<string, unknown>;
+  /**
+   * Abort signal. Kits check it at the op boundary (and between chunks of
+   * chunked work) — cancelled requests stop before the next driver
+   * round-trip. Aborting never rolls back a write that already committed.
+   */
+  signal?: AbortSignal;
+  /**
+   * Retry transient driver failures with exponential backoff. Same shape
+   * everywhere (`TenantPurgeOptions.retry`, kit-internal loops) — see
+   * {@link RetryPolicy}. Default: no retry.
+   */
+  retryPolicy?: RetryPolicy;
   /** Driver-specific escape hatch — see JSDoc. */
   [key: string]: unknown;
 }
@@ -233,20 +247,7 @@ export interface TenantPurgeOptions {
    * stay committed. A retry that eventually succeeds reports `ok: true`;
    * one that exhausts `maxAttempts` aborts with the underlying error.
    */
-  retry?: PurgeRetryPolicy;
-}
-
-/**
- * Retry policy for `purgeByField` chunk-level failures. See
- * `TenantPurgeOptions.retry` for the full contract.
- */
-export interface PurgeRetryPolicy {
-  /** Max attempts per chunk (including the first try). Default 3. */
-  maxAttempts?: number;
-  /** Base delay (ms) for exponential backoff. Default 100ms. */
-  baseDelayMs?: number;
-  /** Decide whether a given error is transient. Default: retry every error. */
-  shouldRetry?: (err: unknown, attempt: number) => boolean;
+  retry?: RetryPolicy;
 }
 
 /** Chunk-level progress event for `purgeByField`. */
@@ -1358,6 +1359,19 @@ export interface MinimalRepo<TDoc> {
  */
 export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
   /**
+   * Runtime capability descriptor — feature-detection at boot instead of
+   * `UnsupportedOperationError` at runtime. Required: every kit declares
+   * what its backend supports (`arrayOperators`, `changeStreams`,
+   * `aggregateOps.percentile`, ...) so kit-portable hosts and arc can
+   * branch once instead of try/catching per call.
+   *
+   * The same shape gates the cross-kit conformance suite
+   * (`ConformanceFeatures` is an alias) — runtime declaration and test
+   * coverage cannot drift.
+   */
+  readonly capabilities: RepoCapabilities;
+
+  /**
    * Atomic compare-and-set. Match one document, mutate it, return the
    * post-update doc (or pre-update when `returnDocument: 'before'`).
    * Returns `null` when no match and `upsert` is false.
@@ -1748,4 +1762,58 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
     fn: (txRepo: StandardRepo<TDoc>) => Promise<T>,
     options?: Record<string, unknown>,
   ): Promise<T>;
+
+  // ── Change feed ──────────────────────────────────────────────────────
+
+  /**
+   * Portable change feed — `for await` over committed mutations:
+   *
+   * ```ts
+   * for await (const change of repo.watch!({ status: 'pending' })) {
+   *   if (change.operation === 'create') enqueue(change.doc!);
+   * }
+   * ```
+   *
+   * Backends differ wildly here, so the method is optional and gated by
+   * `capabilities.changeStreams`:
+   *   - mongokit — Mongo change streams (`Model.watch`); requires a
+   *     replica set. `fullDocument: 'updateLookup'` semantics for updates.
+   *   - SQL kits — typically absent (no native feed). Hosts that need
+   *     a feed on SQL pair the repo with `events` emission instead.
+   *
+   * The iterator ends when `options.signal` aborts. Errors from the
+   * underlying stream propagate to the consumer.
+   */
+  watch?(filter?: FilterInput, options?: WatchOptions): AsyncIterable<ChangeEvent<TDoc>>;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Change feed types
+// ──────────────────────────────────────────────────────────────────────
+
+/** A single committed mutation observed by `watch()`. */
+export interface ChangeEvent<TDoc = unknown> {
+  /** What happened. `replace` = full-document overwrite (Mongo `replaceOne`). */
+  operation: 'create' | 'update' | 'delete' | 'replace';
+  /** Primary key of the affected document. */
+  id?: unknown;
+  /**
+   * The post-image document — present on create/replace always, on update
+   * when the backend supports post-image lookup, absent on delete.
+   */
+  doc?: TDoc;
+  /** Commit timestamp as reported by the backend. */
+  timestamp: Date;
+}
+
+/** Options for `StandardRepo.watch()`. */
+export interface WatchOptions {
+  /** End the iterator. The only portable way to stop a change feed. */
+  signal?: AbortSignal;
+  /**
+   * Resume token / cursor from a previous stream (kit-specific shape —
+   * Mongo resume tokens are opaque BSON). Hosts persist and replay it
+   * for at-least-once consumption across restarts.
+   */
+  resumeAfter?: unknown;
 }

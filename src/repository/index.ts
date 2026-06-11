@@ -31,6 +31,7 @@ export type {
 export type { UpdateInput } from '../update/types.js';
 export { nestDottedKeys, nestDottedKeysAll } from './agg-output.js';
 export { RepositoryBase, type RepositoryBaseOptions } from './base.js';
+export type { AggregateOpsSupport, RepoCapabilities } from './capabilities.js';
 export {
   STANDARD_REPO_OPTION_KEYS,
   type StandardRepoOptionKey,
@@ -43,6 +44,7 @@ export {
   validatePluginOrder,
 } from './plugin-types.js';
 export { type PurgePort, runChunkedPurge, type WritingPurgeStrategy } from './purge.js';
+export { type RetryPolicy, throwIfAborted, withRetry } from './resilience.js';
 export type {
   AggCacheOptions,
   AggDateBucket,
@@ -59,6 +61,7 @@ export type {
   BulkCreateResult,
   BulkWriteOperation,
   BulkWriteResult,
+  ChangeEvent,
   ClaimTransition,
   ClaimVersionTransition,
   DeleteManyResult,
@@ -71,7 +74,6 @@ export type {
   KeysetAggPaginationResult,
   MinimalRepo,
   PaginationParams,
-  PurgeRetryPolicy,
   QueryOptions,
   RepositorySession,
   StandardRepo,
@@ -80,5 +82,6 @@ export type {
   TenantPurgeResult,
   TenantPurgeStrategy,
   UpdateManyResult,
+  WatchOptions,
   WriteOptions,
 } from './types.js';
