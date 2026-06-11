@@ -36,6 +36,7 @@ export {
   startsWith,
   TRUE,
 } from './builders.js';
+export { recordToFilter } from './from-record.js';
 export { isFilter } from './guard.js';
 export { asPredicate, matchFilter } from './match.js';
 export { buildTenantScope, mergeScope, SCOPE_ANY } from './scope.js';

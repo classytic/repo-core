@@ -27,6 +27,7 @@ export {
 } from './field-rules.js';
 export type { SchemaGenerator, SchemaGeneratorContext } from './generator.js';
 export { isSchemaGenerator } from './generator.js';
+export { type StandardSchemaV1, validateStandardSchema } from './standard-schema.js';
 export type {
   CrudSchemas,
   FieldRule,

@@ -48,7 +48,7 @@ When in doubt, search arc + every kit for type uses before you change a signatur
 When a kit can't implement an op (e.g. SQLite has no native percentile), **don't shoehorn an approximation**. The pattern:
 
 1. **Repo-core IR**: add the op to the union with JSDoc noting per-kit support
-2. **`AggregateOpsSupport`** in `src/testing/types.ts`: add `<op>?: boolean` flag (optional, defaults to `false` — kits opt INTO support)
+2. **`AggregateOpsSupport`** in `src/repository/capabilities.ts` (canonical home since 0.6.0; `/testing` re-exports it, and `ConformanceFeatures` is an alias of `RepoCapabilities`): add `<op>?: boolean` flag (optional, defaults to `false` — kits opt INTO support)
 3. **Conformance gate helper** at top of `runStandardRepoConformance`: `const skipNoX = !aggGate || !ops?.X`
 4. **Conformance scenarios**: `it.skipIf(skipNoX)('does X correctly', ...)` and `it.skipIf(skipNoX)('throws on bad input', ...)`
 5. **Each kit's harness**: declare `aggregateOps: { X: true|false }` with a one-line rationale comment (cite the SQL/Mongo function, the version requirement, or the reason for not supporting)
