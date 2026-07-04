@@ -149,3 +149,34 @@ describe('DEFAULT_TENANT_CONFIG', () => {
     });
   });
 });
+
+describe('explicit-undefined safety (0.6.1 — P10 widened optionals)', () => {
+  it('explicit undefined values never clobber defaults through the spread', () => {
+    const cfg = resolveTenantConfig({
+      tenantField: undefined,
+      required: undefined,
+      ref: undefined,
+      contextKey: undefined,
+      fieldType: undefined,
+    });
+    expect(cfg.tenantField).toBe('organizationId');
+    expect(cfg.required).toBe(true);
+    expect(cfg.ref).toBe('organization');
+    expect(cfg.contextKey).toBe('organizationId');
+    expect(cfg.fieldType).toBe('objectId');
+    expect(cfg.enabled).toBe(true);
+  });
+
+  it('explicit undefined alongside real values keeps the real values', () => {
+    const cfg = resolveTenantConfig({ tenantField: 'branchId', required: undefined });
+    expect(cfg.tenantField).toBe('branchId');
+    expect(cfg.contextKey).toBe('branchId'); // cascade still mirrors the rename
+    expect(cfg.required).toBe(true);
+  });
+
+  it('strategy: none path also strips explicit undefined before preserving fields', () => {
+    const cfg = resolveTenantConfig({ strategy: 'none', fieldType: undefined });
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.fieldType).toBe('objectId');
+  });
+});

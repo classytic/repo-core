@@ -4,6 +4,24 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-07-04
+
+### Changed — `TenantConfig` optionals widened to `T | undefined` (P10)
+
+Every optional prop on `TenantConfig` (`strategy`, `enabled`, `tenantField`,
+`fieldType`, `ref`, `contextKey`, `required`, `resolve`) is now typed
+`T | undefined`, so downstream packages compiling with
+`exactOptionalPropertyTypes: true` can extend it without redeclaring props
+(unblocks `@classytic/ledger`'s `MultiTenantConfig.required` exception).
+
+`resolveTenantConfig` strips explicit-`undefined` keys before spreading
+over `DEFAULT_TENANT_CONFIG`, so `{ required: maybeUndefined }` can never
+clobber a default with `undefined` — previously the un-widened type made
+that unrepresentable; now it's handled at runtime and pinned by tests.
+`DEFAULT_TENANT_CONFIG`'s annotation moved from `Required<Pick<...>>` to an
+`Exclude<..., undefined>` mapping (`-?` does not strip an explicit
+undefined union member). No runtime behavior change for existing callers.
+
 ## [0.6.0] - 2026-06-11
 
 Standardization release. Coordinated with mongokit 3.16 + sqlitekit 0.6.
