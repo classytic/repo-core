@@ -4,6 +4,23 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-04
+
+### Added — `./sync` change-log / cursor contract
+
+Storage-agnostic data-sync spine for offline-first + incremental replication:
+`ChangeLogStore`, `ChangeEntry` (tombstone deletes), pull `ChangesPage`
+(opaque exclusive cursors, `hasMore` paging), Replicache-style `PushMutation`
+/ `PushVerdict` (idempotent client mutation ids, server-authoritative
+conflicts), `CursorExpiredError` (compaction horizon → full resync), and the
+`MemoryChangeLogStore` reference impl pinning the contract semantics.
+
+Synthesized from CouchDB `_changes` (tombstones/checkpoints), Drive/Graph
+delta APIs (opaque server-issued cursors), Mongo change-stream resume tokens,
+and Replicache push/pull. Contract only — kits (mongokit/prismakit/sqlitekit)
+implement capture + durable stores via repository plugins; arc re-exports the
+surface at `@classytic/arc/sync`; sync HTTP endpoints are an arc module.
+
 ## [0.6.1] - 2026-07-04
 
 ### Changed — `TenantConfig` optionals widened to `T | undefined` (P10)

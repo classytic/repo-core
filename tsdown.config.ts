@@ -5,6 +5,7 @@ export default defineConfig({
   // so `dist/` mirrors the public subpath map regardless of how many entries exist.
   entry: {
     'hooks/index': 'src/hooks/index.ts',
+    'sync/index': 'src/sync/index.ts',
     'operations/index': 'src/operations/index.ts',
     'errors/index': 'src/errors/index.ts',
     'pagination/index': 'src/pagination/index.ts',
