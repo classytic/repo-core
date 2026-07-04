@@ -52,7 +52,7 @@ export interface TenantConfig {
    *
    * @default 'field'
    */
-  strategy?: TenantStrategy;
+  strategy?: TenantStrategy | undefined;
 
   /**
    * Whether tenant scoping is active. When `false`, the package runs in
@@ -61,7 +61,7 @@ export interface TenantConfig {
    *
    * @default true
    */
-  enabled?: boolean;
+  enabled?: boolean | undefined;
 
   /**
    * Document / column field name that stores the tenant id. Used when
@@ -69,14 +69,14 @@ export interface TenantConfig {
    *
    * @default 'organizationId'
    */
-  tenantField?: string;
+  tenantField?: string | undefined;
 
   /**
    * How to store / cast the tenant id.
    *
    * @default 'objectId'
    */
-  fieldType?: TenantFieldType;
+  fieldType?: TenantFieldType | undefined;
 
   /**
    * Mongoose ref for `'objectId'` types. Ignored by SQL kits and when
@@ -84,7 +84,7 @@ export interface TenantConfig {
    *
    * @default 'organization'
    */
-  ref?: string;
+  ref?: string | undefined;
 
   /**
    * Which key on the repository context to read the tenant id from.
@@ -99,7 +99,7 @@ export interface TenantConfig {
    *
    * @default tenantField ?? 'organizationId'
    */
-  contextKey?: string;
+  contextKey?: string | undefined;
 
   /**
    * Whether the field is required. When `false`, the package permits
@@ -107,7 +107,7 @@ export interface TenantConfig {
    *
    * @default true
    */
-  required?: boolean;
+  required?: boolean | undefined;
 
   /**
    * Custom resolver — called when `strategy === 'custom'` to produce the
@@ -130,7 +130,7 @@ export interface TenantConfig {
    * }
    * ```
    */
-  resolve?: (ctx: Record<string, unknown>) => Record<string, unknown>;
+  resolve?: (ctx: Record<string, unknown>) => Record<string, unknown> | undefined;
 }
 
 /**
@@ -146,5 +146,5 @@ export type ResolvedTenantConfig = {
   ref: string;
   contextKey: string;
   required: boolean;
-  resolve?: TenantConfig['resolve'];
+  resolve?: TenantConfig['resolve'] | undefined;
 };
