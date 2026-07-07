@@ -232,6 +232,8 @@ Consumed by:
 
 See [INFRA.md](./INFRA.md) for the architectural principles, subpath map, build/tooling decisions, and the roadmap for pgkit / prismakit.
 
+See [docs/data-lifecycle.md](./docs/data-lifecycle.md) for the billion-row runbook — retention/TTL, `archiveByFilter` cold-storage extraction, `cursor()` streaming scans, tenant purge, the distribution-key guard, and the per-backend sharding/partitioning/backup playbook (what the kits own vs what the database owns).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

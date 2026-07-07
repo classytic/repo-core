@@ -30,8 +30,22 @@ export type {
  */
 export type { UpdateInput } from '../update/types.js';
 export { nestDottedKeys, nestDottedKeysAll } from './agg-output.js';
+export {
+  type ArchiveOptions,
+  type ArchivePort,
+  type ArchiveProgress,
+  type ArchiveResult,
+  type ArchiveSink,
+  runChunkedArchive,
+} from './archive.js';
 export { RepositoryBase, type RepositoryBaseOptions } from './base.js';
 export type { AggregateOpsSupport, RepoCapabilities } from './capabilities.js';
+export {
+  createDistributionGuard,
+  type DistributionConfig,
+  type DistributionMissHandler,
+  filterReferencesKey,
+} from './distribution.js';
 export {
   STANDARD_REPO_OPTION_KEYS,
   type StandardRepoOptionKey,
@@ -64,6 +78,7 @@ export type {
   ChangeEvent,
   ClaimTransition,
   ClaimVersionTransition,
+  CursorOptions,
   DeleteManyResult,
   DeleteOptions,
   DeleteResult,

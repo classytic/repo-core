@@ -7,9 +7,30 @@ import { describe, expect, it } from 'vitest';
 import { CursorExpiredError, MemoryChangeLogStore } from '../../../src/sync/index.js';
 
 const seed = async (store: MemoryChangeLogStore<{ n: number }>) => {
-  await store.append({ scope: 'pos-order', docId: 'a', op: 'upsert', version: 1, doc: { n: 1 }, tenantId: 't1' });
-  await store.append({ scope: 'pos-order', docId: 'b', op: 'upsert', version: 1, doc: { n: 2 }, tenantId: 't1' });
-  await store.append({ scope: 'product', docId: 'p', op: 'upsert', version: 3, doc: { n: 3 }, tenantId: 't2' });
+  await store.append({
+    scope: 'pos-order',
+    docId: 'a',
+    op: 'upsert',
+    version: 1,
+    doc: { n: 1 },
+    tenantId: 't1',
+  });
+  await store.append({
+    scope: 'pos-order',
+    docId: 'b',
+    op: 'upsert',
+    version: 1,
+    doc: { n: 2 },
+    tenantId: 't1',
+  });
+  await store.append({
+    scope: 'product',
+    docId: 'p',
+    op: 'upsert',
+    version: 3,
+    doc: { n: 3 },
+    tenantId: 't2',
+  });
   await store.append({ scope: 'pos-order', docId: 'a', op: 'delete', version: 2, tenantId: 't1' });
 };
 
