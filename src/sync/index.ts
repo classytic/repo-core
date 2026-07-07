@@ -42,7 +42,7 @@
 /** What happened to a document. Field-level patches are deliberately out of
  *  scope — version-checked upserts + server authority beat CRDT complexity
  *  for ERP data (the Sheets/Replicache position, not the Figma one). */
-export type ChangeOp = "upsert" | "delete";
+export type ChangeOp = 'upsert' | 'delete';
 
 export interface ChangeEntry<TDoc = unknown> {
   /** Which logical collection/resource this change belongs to (e.g. `pos-order`). */
@@ -104,7 +104,7 @@ export interface PushMutation<TDoc = unknown> {
   readonly mutationId: string;
 }
 
-export type PushVerdictStatus = "applied" | "already_applied" | "conflict" | "rejected";
+export type PushVerdictStatus = 'applied' | 'already_applied' | 'conflict' | 'rejected';
 
 export interface PushVerdict<TDoc = unknown> {
   readonly mutationId: string;
@@ -127,13 +127,16 @@ export interface ChangeLogAppendOptions {
 
 export interface ChangeLogStore<TDoc = unknown> {
   /** Record a change. `cursor`/`at` are ASSIGNED by the store; callers pass the rest. */
-  append(entry: Omit<ChangeEntry<TDoc>, "cursor" | "at">, options?: ChangeLogAppendOptions): Promise<ChangeEntry<TDoc>>;
+  append(
+    entry: Omit<ChangeEntry<TDoc>, 'cursor' | 'at'>,
+    options?: ChangeLogAppendOptions,
+  ): Promise<ChangeEntry<TDoc>>;
 
   /** Entries strictly AFTER `cursor` (empty string = from the beginning). */
   since(cursor: string, options?: ChangesSinceOptions): Promise<ChangesPage<TDoc>>;
 
   /** The current head checkpoint — what a fresh client stores after a full load. */
-  latestCursor(options?: Pick<ChangesSinceOptions, "tenantId" | "scopes">): Promise<string>;
+  latestCursor(options?: Pick<ChangesSinceOptions, 'tenantId' | 'scopes'>): Promise<string>;
 
   /**
    * Compact entries older than `before`, keeping per-doc latest state.
@@ -148,8 +151,10 @@ export class CursorExpiredError extends Error {
     public readonly cursor: string,
     public readonly horizon: string,
   ) {
-    super(`[repo-core:sync] cursor "${cursor}" predates the compaction horizon — full resync required.`);
-    this.name = "CursorExpiredError";
+    super(
+      `[repo-core:sync] cursor "${cursor}" predates the compaction horizon — full resync required.`,
+    );
+    this.name = 'CursorExpiredError';
   }
 }
 
@@ -162,11 +167,11 @@ export class MemoryChangeLogStore<TDoc = unknown> implements ChangeLogStore<TDoc
   private seq = 0;
 
   async append(
-    entry: Omit<ChangeEntry<TDoc>, "cursor" | "at">,
+    entry: Omit<ChangeEntry<TDoc>, 'cursor' | 'at'>,
     _options?: ChangeLogAppendOptions,
   ): Promise<ChangeEntry<TDoc>> {
     // Lexicographically ordered opaque cursor (zero-padded sequence).
-    const cursor = String(++this.seq).padStart(16, "0");
+    const cursor = String(++this.seq).padStart(16, '0');
     const full: ChangeEntry<TDoc> = { ...entry, cursor, at: new Date() };
     this.entries.push(full);
     return full;
@@ -191,6 +196,6 @@ export class MemoryChangeLogStore<TDoc = unknown> implements ChangeLogStore<TDoc
 
   async latestCursor(): Promise<string> {
     const last = this.entries[this.entries.length - 1];
-    return last ? last.cursor : "";
+    return last ? last.cursor : '';
   }
 }

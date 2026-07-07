@@ -59,6 +59,8 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
   const skipNoStddev = !aggGate || !ops?.stddev;
   const skipNoCache = !aggGate || !ops?.cache;
   const skipNoPurge = !harness.features.purgeByField;
+  const skipNoArchive = !harness.features.archiveByFilter;
+  const skipNoStreaming = !harness.features.streaming;
 
   describe(`[conformance] ${harness.name}`, () => {
     let ctx: ConformanceContext<TDoc>;
@@ -1422,6 +1424,187 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
           expect(result.processed).toBe(3);
         },
       );
+    });
+
+    // ────────────────────────────────────────────────────────────────
+    // archiveByFilter — cold-storage extraction (write-before-delete)
+    // ────────────────────────────────────────────────────────────────
+    describe('archiveByFilter (cold-storage extraction)', () => {
+      /** In-memory sink — duplicate-tolerant by keying on the id field. */
+      const makeSink = () => {
+        const byId = new Map<string, TDoc>();
+        let flushes = 0;
+        return {
+          sink: {
+            write: async (docs: readonly TDoc[]) => {
+              for (const doc of docs) {
+                byId.set(String((doc as Record<string, unknown>)[harness.idField]), doc);
+              }
+            },
+            flush: async () => {
+              flushes += 1;
+            },
+          },
+          get docs() {
+            return [...byId.values()];
+          },
+          get flushes() {
+            return flushes;
+          },
+        };
+      };
+
+      const seedTenants = async (hot: number, keep: number) => {
+        for (let i = 0; i < hot; i++) {
+          await ctx.repo.create(harness.makeDoc({ name: `arch-${i}`, category: 'org-cold' }));
+        }
+        for (let i = 0; i < keep; i++) {
+          await ctx.repo.create(harness.makeDoc({ name: `keep-${i}`, category: 'org-hot' }));
+        }
+      };
+
+      it.skipIf(skipNoArchive)(
+        'moves matching rows into the sink and removes them from the hot store',
+        async () => {
+          if (!ctx.repo.archiveByFilter) return;
+          await seedTenants(3, 2);
+          const memory = makeSink();
+
+          const result = await ctx.repo.archiveByFilter({ category: 'org-cold' }, memory.sink);
+
+          expect(result.ok).toBe(true);
+          expect(result.processed).toBe(3);
+          expect(memory.docs).toHaveLength(3);
+          expect(await ctx.repo.count!({ category: 'org-cold' })).toBe(0);
+          expect(await ctx.repo.count!({ category: 'org-hot' })).toBe(2);
+          expect(memory.flushes).toBe(1);
+        },
+      );
+
+      it.skipIf(skipNoArchive)(
+        'write-before-delete: a failing sink aborts with every row still hot',
+        async () => {
+          if (!ctx.repo.archiveByFilter) return;
+          await seedTenants(3, 0);
+
+          const result = await ctx.repo.archiveByFilter(
+            { category: 'org-cold' },
+            {
+              write: async () => {
+                throw new Error('sink unavailable');
+              },
+            },
+          );
+
+          expect(result.ok).toBe(false);
+          expect(result.error?.phase).toBe('sink');
+          expect(result.processed).toBe(0);
+          // Nothing left the hot store — the delete never ran.
+          expect(await ctx.repo.count!({ category: 'org-cold' })).toBe(3);
+        },
+      );
+
+      it.skipIf(skipNoArchive)(
+        'chunking: batchSize honored, cumulative progress, all rows sunk',
+        async () => {
+          if (!ctx.repo.archiveByFilter) return;
+          await seedTenants(25, 0);
+          const memory = makeSink();
+          const events: Array<{ processed: number; chunkSize: number }> = [];
+
+          const result = await ctx.repo.archiveByFilter({ category: 'org-cold' }, memory.sink, {
+            batchSize: 10,
+            onProgress: (event) => {
+              events.push({ processed: event.processed, chunkSize: event.chunkSize });
+            },
+          });
+
+          expect(result.processed).toBe(25);
+          expect(memory.docs).toHaveLength(25);
+          expect(events).toEqual([
+            { processed: 10, chunkSize: 10 },
+            { processed: 20, chunkSize: 10 },
+            { processed: 25, chunkSize: 5 },
+          ]);
+        },
+      );
+
+      it.skipIf(skipNoArchive)('idempotent: a second run archives 0', async () => {
+        if (!ctx.repo.archiveByFilter) return;
+        await seedTenants(3, 0);
+        const memory = makeSink();
+
+        const first = await ctx.repo.archiveByFilter({ category: 'org-cold' }, memory.sink);
+        expect(first.processed).toBe(3);
+
+        const second = await ctx.repo.archiveByFilter({ category: 'org-cold' }, memory.sink);
+        expect(second.ok).toBe(true);
+        expect(second.processed).toBe(0);
+      });
+
+      it.skipIf(skipNoArchive)(
+        'abort signal stops between chunks; archived chunks stay archived',
+        async () => {
+          if (!ctx.repo.archiveByFilter) return;
+          await seedTenants(25, 0);
+          const memory = makeSink();
+          const controller = new AbortController();
+
+          const result = await ctx.repo.archiveByFilter({ category: 'org-cold' }, memory.sink, {
+            batchSize: 10,
+            signal: controller.signal,
+            onProgress: (event) => {
+              if (event.processed === 10) controller.abort();
+            },
+          });
+
+          expect(result.ok).toBe(false);
+          expect(result.processed).toBe(10);
+          expect(memory.docs).toHaveLength(10);
+          expect(await ctx.repo.count!({ category: 'org-cold' })).toBe(15);
+        },
+      );
+    });
+
+    // ────────────────────────────────────────────────────────────────
+    // cursor — streaming reads over batch boundaries
+    // ────────────────────────────────────────────────────────────────
+    describe('cursor (streaming reads)', () => {
+      it.skipIf(skipNoStreaming)(
+        'iterates every matching row exactly once across batch boundaries',
+        async () => {
+          if (!ctx.repo.cursor) return;
+          for (let i = 0; i < 7; i++) {
+            await ctx.repo.create(harness.makeDoc({ name: `stream-${i}`, category: 'streamable' }));
+          }
+          await ctx.repo.create(harness.makeDoc({ name: 'other', category: 'not-streamable' }));
+
+          const seen: string[] = [];
+          for await (const doc of ctx.repo.cursor({ category: 'streamable' }, { batchSize: 3 })) {
+            seen.push(String((doc as Record<string, unknown>)[harness.idField]));
+          }
+
+          expect(seen).toHaveLength(7);
+          expect(new Set(seen).size).toBe(7);
+        },
+      );
+
+      it.skipIf(skipNoStreaming)('breaking out early releases the iterator cleanly', async () => {
+        if (!ctx.repo.cursor) return;
+        for (let i = 0; i < 5; i++) {
+          await ctx.repo.create(harness.makeDoc({ name: `brk-${i}` }));
+        }
+
+        let taken = 0;
+        for await (const _doc of ctx.repo.cursor({}, { batchSize: 2 })) {
+          taken += 1;
+          if (taken === 2) break;
+        }
+        expect(taken).toBe(2);
+
+        // The repo remains fully usable after an abandoned iterator.
+        expect(await ctx.repo.count!({})).toBe(5);
+      });
     });
   });
 }

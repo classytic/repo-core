@@ -4,6 +4,17 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-08
+
+### Added — data-lifecycle contract (archive, streaming, distribution awareness)
+
+Additive release: existing kits on 0.7 semantics compile and pass conformance unchanged (new scenarios are capability-gated and default to skipped).
+
+- **`archiveByFilter` + `runChunkedArchive`** (`repository/archive.ts`) — the cold-storage twin of `purgeByField`. Hosts provide an `ArchiveSink` (archive table/collection, JSONL, warehouse loader); kits provide an `ArchivePort` (`readChunk` in stable PK order / `deleteChunk` by docs). The orchestrator enforces **write-before-delete** (a crash re-archives, never loses; sinks must be duplicate-tolerant — at-least-once by design), chunked `batchSize` (default 1000), per-step retry via the shared `RetryPolicy`, abort between chunks, cumulative progress, and phase-tagged errors (`read` / `sink` / `delete` — a `sink` failure guarantees rows are still hot). New capability flag: `archiveByFilter`.
+- **`cursor()` declared on `StandardRepo`** (+ `CursorOptions`) — the streaming-reads method mongokit and sqlitekit already implement is now part of the portable contract (`AsyncIterable<TDoc>`, internal `batchSize` fetching, non-snapshot semantics documented). Gated by the existing `streaming` capability.
+- **Distribution-key awareness** (`repository/distribution.ts`) — `DistributionConfig` (`key`, `onMissingKey: 'warn' | 'throw' | 'off'`, `exemptOperations`) + `createDistributionGuard` + `filterReferencesKey` (Filter IR via `collectFields`, raw records incl. `$and`/`$or`/`AND`/`OR` branches). Catches shard/partition-key-missing scatter-gather queries at the access layer; deliberately does NOT implement routing/rebalancing/partition DDL — those stay database-native (Mongo sharding, pg_partman/Timescale).
+- **Conformance**: new capability-gated scenario groups — `archiveByFilter` (sink round-trip, write-before-delete on sink failure, chunking + progress, idempotent re-run, abort partial) and `cursor` (exact-once iteration across batch boundaries, early-break safety).
+
 ## [0.7.0] - 2026-07-04
 
 ### Added — `./sync` change-log / cursor contract

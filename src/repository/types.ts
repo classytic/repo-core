@@ -21,6 +21,7 @@ import type { Filter } from '../filter/types.js';
 import type { LookupPopulateOptions, LookupPopulateResult, LookupSpec } from '../lookup/types.js';
 import type { OffsetPaginationResult } from '../pagination/types.js';
 import type { UpdateInput } from '../update/types.js';
+import type { ArchiveOptions, ArchiveResult, ArchiveSink } from './archive.js';
 import type { RepoCapabilities } from './capabilities.js';
 import type { RetryPolicy } from './resilience.js';
 
@@ -1643,6 +1644,52 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
   ): Promise<TenantPurgeResult>;
 
   /**
+   * Chunked cold-storage extraction — move every row matching `filter`
+   * into a host-provided {@link ArchiveSink}, then remove it from the hot
+   * store. THE data-lifecycle primitive for retention windows and
+   * hot-table size control ("archive orders older than 18 months").
+   *
+   * **Write-before-delete.** Rows leave the hot store only after the sink
+   * acknowledged the chunk — a crash re-archives the same chunk (sinks
+   * must be duplicate-tolerant); data is never lost. At-least-once, the
+   * same envelope semantics as `purgeByField`.
+   *
+   * **Index requirement.** Same as purge: the filter's leading field(s)
+   * must be indexed or every chunk re-scans the table.
+   *
+   * **When NOT to use it.** On Postgres with time-partitioned tables,
+   * detaching/dropping a partition archives a billion rows in O(1) —
+   * prefer that (pg_partman / Timescale retention policies) and keep this
+   * method for non-partitioned tables and portable code paths.
+   *
+   * Optional method; gate on `capabilities.archiveByFilter`.
+   *
+   * @param filter  Predicate selecting rows to archive.
+   * @param sink    Destination (archive table/collection, JSONL, ...).
+   * @param options Chunking, progress, abort signal, retry.
+   */
+  archiveByFilter?(
+    filter: FilterInput,
+    sink: ArchiveSink<TDoc>,
+    options?: ArchiveOptions,
+  ): Promise<ArchiveResult>;
+
+  /**
+   * Streaming reads — an async iterator over every row matching `filter`,
+   * fetched in `batchSize` chunks (keyset-progressed on SQL kits, native
+   * driver cursor on Mongo) so billion-row scans never load the result
+   * set into memory. Drive with `for await`; breaking out releases the
+   * underlying cursor/batch loop.
+   *
+   * Rows inserted behind the iteration point during the scan are not
+   * revisited; rows inserted ahead may appear — the usual non-snapshot
+   * cursor semantics every backend shares.
+   *
+   * Optional method; gate on `capabilities.streaming`.
+   */
+  cursor?(filter?: FilterInput, options?: CursorOptions): AsyncIterable<TDoc>;
+
+  /**
    * Heterogeneous bulk write. Stays optional — kits dispatch each op
    * against the appropriate driver primitive inside a single transaction;
    * see each kit's docs for the exact semantics of `upsert` and
@@ -1816,4 +1863,17 @@ export interface WatchOptions {
    * for at-least-once consumption across restarts.
    */
   resumeAfter?: unknown;
+}
+
+/**
+ * Options for `StandardRepo.cursor()` streaming reads. The open index
+ * signature lets kit-specific knobs (mongokit's `organizationId` opt-out,
+ * read-preference hints) flow without widening the portable contract.
+ */
+export interface CursorOptions {
+  /** Rows fetched per underlying batch. Default kit-specific (~100–1000). */
+  batchSize?: number;
+  /** Iteration order. Kits default to primary-key ascending. */
+  sort?: Record<string, 1 | -1>;
+  [key: string]: unknown;
 }

@@ -128,6 +128,12 @@ export interface RepoCapabilities {
    */
   purgeByField?: boolean;
   /**
+   * `archiveByFilter(filter, sink, options)` — chunked cold-storage
+   * extraction (write-before-delete, at-least-once). The data-lifecycle
+   * twin of `purgeByField`.
+   */
+  archiveByFilter?: boolean;
+  /**
    * Mongo-style array update operators (`$push`, `$pull`, `$addToSet`,
    * `$pop`, `$pullAll`). Mongokit: native. Sqlitekit: implemented over
    * JSON TEXT columns via `json_insert` / `json_each` rewrites — see
