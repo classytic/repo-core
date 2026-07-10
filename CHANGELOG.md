@@ -4,6 +4,12 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-07-11
+
+### Docs — `DataAdapter.close()` ownership rule
+
+- Clarified the `close?()` contract (doc-only, no type/runtime change): the adapter does **not** own the database connection — the host does, and `close()` must release only adapter/kit-owned resources (TTL/vacuum timers, change streams), never disconnect a shared client/pool. Kits that genuinely own a connection gate its disposal behind an explicit opt-in. This standardizes cleanup semantics across mongokit/sqlitekit/pgkit/prismakit.
+
 ## [0.8.0] - 2026-07-08
 
 ### Added — data-lifecycle contract (archive, streaming, distribution awareness)

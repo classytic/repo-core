@@ -217,7 +217,25 @@ export interface DataAdapter<TDoc = unknown> {
    */
   matchesFilter?: (item: unknown, filters: Record<string, unknown>) => boolean;
 
-  /** Close / cleanup resources. */
+  /**
+   * Release resources this ADAPTER (or its repository) allocated —
+   * background timers (TTL / vacuum sweepers), open change streams,
+   * kit-internal caches. Safe to call more than once.
+   *
+   * **Ownership rule (load-bearing).** The adapter does NOT own the
+   * database connection — the HOST does. The host wrote
+   * `new PrismaClient()` / `new Pool()` / `mongoose.connect()`, so the
+   * host closes it (typically in its own `onClose`). `close()` MUST NOT
+   * disconnect a connection it didn't open: several resources commonly
+   * share one client/pool, so tearing it down from one adapter would
+   * break every sibling resource. Kits that must dispose a connection
+   * they genuinely own gate it behind an explicit opt-in (e.g.
+   * prismakit's `ownsClient`).
+   *
+   * Kits with nothing kit-owned to release still MAY implement this as a
+   * documented no-op so hosts can call `adapter.close()` uniformly across
+   * every backend without feature-detecting.
+   */
   close?(): Promise<void>;
 
   /**
