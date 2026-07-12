@@ -4,6 +4,42 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-11
+
+### Added — `StandardRepo.getByIds` (batch point-read)
+
+- **`getByIds?(ids: readonly string[], options?: FindAllOptions): Promise<Map<string, TDoc>>`**
+  added to `StandardRepo` — the `$in` / `IN (...)` counterpart to `getById`. The N+1
+  killer for callers resolving many ids in one tick (order-line snapshotting, dashboard
+  row enrichment, reference expansion).
+
+  **Contract:**
+  - Kit de-duplicates ids before the driver round-trip.
+  - Ids with no matching doc are ABSENT from the returned `Map` — never throw on a miss.
+  - Structurally invalid ids are treated as misses (one malformed id must never fail the
+    batch).
+  - Tenant scoping, soft-delete, and hooks apply exactly as they would to `getById`.
+  - Empty input → empty Map, no round-trip.
+  - Optional: kits adopt incrementally. Callers feature-detect
+    (`repo.getByIds ?? per-id fallback`) until their kit floor ships it.
+  - Sizing is backend-bound (Mongo: 16 MB query document); keep batches ≤ ~10k ids and
+    chunk beyond.
+
+- **`events.ts` clarification** — `getByIds` has no `BEFORE_GET_BY_IDS` event by design.
+  It routes through `findAll`, so observers see the batch as `before:findAll` / `after:findAll`
+  with an `$in` filter. The comment guards against accidentally adding a separate event.
+
+- **New type-level contract test** (`tests/unit/repository/get-by-ids-contract.test.ts`) —
+  pins the `getByIds` shape for kits implementing it: `Map<string, TDoc>` keyed by
+  stringified id, `readonly string[]` input. Verifies that kits without `getByIds` still
+  conform (the member is optional).
+
+### Changed
+
+- `ChangesPage.changes` type: `ReadonlyArray<ChangeEntry<TDoc>>` → `readonly ChangeEntry<TDoc>[]`
+  (canonical form — functionally identical).
+- devDeps: `tsdown ^0.21.8 → ^0.22.5`, `typescript ^6.0.3 → ^7.0.2`.
+
 ## [0.8.1] - 2026-07-11
 
 ### Docs — `DataAdapter.close()` ownership rule

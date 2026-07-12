@@ -90,6 +90,11 @@ export const HOOK_EVENTS = {
   BEFORE_FIND_ALL: 'before:findAll',
   AFTER_FIND_ALL: 'after:findAll',
   ERROR_FIND_ALL: 'error:findAll',
+  // NOTE: `getByIds` (StandardRepo optional batch point-read) has NO events
+  // of its own by design — it's a composite that routes through `findAll`,
+  // so plugins/observers see the batch as `before:findAll`/`after:findAll`
+  // with an `$in` filter. Don't add BEFORE_GET_BY_IDS without also changing
+  // that contract in repository/types.ts.
 
   BEFORE_GET_OR_CREATE: 'before:getOrCreate',
   AFTER_GET_OR_CREATE: 'after:getOrCreate',

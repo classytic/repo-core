@@ -1522,6 +1522,31 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
   getOne?(filter: FilterInput, options?: QueryOptions): Promise<TDoc | null>;
   /** Alias many kits expose alongside `getOne`. Arc checks both names. */
   getByQuery?(filter: FilterInput, options?: QueryOptions): Promise<TDoc | null>;
+  /**
+   * Batch point-read — the `$in` / `IN (...)` counterpart to `getById`.
+   * Fetches every doc whose primary key is in `ids` in ONE query and
+   * returns a Map keyed by the STRINGIFIED id (`String(doc.id)`) for O(1)
+   * lookup. The N+1 killer for callers resolving many ids in one tick
+   * (order-line snapshotting, dashboard row enrichment, reference
+   * expansion).
+   *
+   * **Contract:**
+   *   - Input ids are de-duplicated by the kit.
+   *   - Ids with no matching doc are simply ABSENT from the Map — never
+   *     throw on a miss (mirrors `getById`'s null-on-miss form).
+   *   - Structurally invalid ids (impossible for the backend's key type)
+   *     are treated as misses and dropped — one malformed id must never
+   *     fail the batch.
+   *   - Same policy surface as a single read: tenant scoping, soft-delete,
+   *     and hooks apply to the batch exactly as they would to `getById`.
+   *   - Empty input → empty Map, no driver round-trip.
+   *
+   * Optional: kits adopt incrementally. Callers feature-detect
+   * (`repo.getByIds ?? per-id fallback`) until their kit floor ships it.
+   * Sizing is backend-bound (e.g. Mongo's 16 MB query document); keep
+   * batches ≤ ~10k ids and chunk beyond.
+   */
+  getByIds?(ids: readonly string[], options?: FindAllOptions): Promise<Map<string, TDoc>>;
 
   // ── Projections & existence ──────────────────────────────────────────
   count?(filter?: FilterInput, options?: QueryOptions): Promise<number>;

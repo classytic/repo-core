@@ -79,7 +79,7 @@ export interface ChangesSinceOptions {
 }
 
 export interface ChangesPage<TDoc = unknown> {
-  readonly changes: ReadonlyArray<ChangeEntry<TDoc>>;
+  readonly changes: readonly ChangeEntry<TDoc>[];
   /** Checkpoint AFTER applying this page — echo into the next `since`. */
   readonly cursor: string;
   /** True → more entries exist; pull again immediately. */
