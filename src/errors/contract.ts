@@ -55,9 +55,10 @@ export function statusToErrorCode(status: number): ErrorCode {
  * `validationErrors` (mongokit-shaped throwable field) is mapped into the
  * canonical `details` array so wire consumers see one shape regardless
  * of which kit threw the error. Each `validationErrors[i]` becomes an
- * `ErrorDetail` with `code: validator`, `message: error`, `path` left
- * unset (kits that have field paths set them in their own ErrorDetail
- * mapping).
+ * `ErrorDetail` with `code: validator`, `message: error`, plus `path` and
+ * `meta` when the throwing kit populates them (field-scoped validators
+ * like ledger's `FieldError` — so a kernel's rich field errors reach the
+ * wire natively, with NO per-host errorMapper).
  *
  * `duplicate.fields` is similarly flattened into `details` with the
  * duplicate-key code so unique-constraint failures look uniform on the
@@ -83,10 +84,20 @@ export function toErrorContract(error: unknown): ErrorContract {
   };
 
   // Map throwable structured fields into the canonical `details` array.
-  const details: Array<{ path?: string; code: string; message: string }> = [];
+  const details: Array<{
+    path?: string;
+    code: string;
+    message: string;
+    meta?: Readonly<Record<string, unknown>>;
+  }> = [];
   if (Array.isArray(e.validationErrors)) {
     for (const v of e.validationErrors) {
-      details.push({ code: v.validator, message: v.error });
+      details.push({
+        ...(v.path ? { path: v.path } : {}),
+        code: v.validator,
+        message: v.error,
+        ...(v.meta ? { meta: v.meta } : {}),
+      });
     }
   }
   if (e.duplicate?.fields?.length) {

@@ -44,6 +44,19 @@ export interface DuplicateKeyMeta {
 export interface ValidationErrorMeta {
   validator: string;
   error: string;
+  /**
+   * Dot-path to the offending field (e.g. `'journalItems.2.account'`).
+   * Optional — kits with field-scoped validation (ledger's `FieldError`,
+   * mongoose ValidationError) set it so it flows onto the wire
+   * {@link ErrorDetail.path} via {@link toErrorContract} instead of being
+   * dropped. Kits without a path leave it unset.
+   */
+  path?: string;
+  /**
+   * Non-PII structured extra for this field (e.g. the offending value under
+   * `{ value }`). Flows onto {@link ErrorDetail.meta}. Never include secrets.
+   */
+  meta?: Readonly<Record<string, unknown>>;
 }
 
 /**

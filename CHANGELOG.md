@@ -4,6 +4,21 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-13
+
+### Added — `ValidationErrorMeta.path` + `.meta` (field-scoped validation errors)
+
+- **`ValidationErrorMeta.path?: string`** — dot-path to the offending field
+  (e.g. `'journalItems.2.account'`). Set by kits with field-scoped validation
+  (ledger's `FieldError`, Mongoose `ValidationError`). Absent when the kit doesn't
+  have a field path.
+- **`ValidationErrorMeta.meta?: Readonly<Record<string, unknown>>`** — non-PII
+  structured extra for the field (e.g. `{ value: 'bad' }`). Never include secrets.
+- **`toErrorContract`** now forwards `path` and `meta` from each `validationErrors`
+  entry onto the wire `ErrorDetail`. Previously only `code` and `message` were mapped;
+  field paths were silently dropped. No breaking change — both fields are optional and
+  additive. Kits that don't set them produce the same wire shape as before.
+
 ## [0.9.0] - 2026-07-11
 
 ### Added — `StandardRepo.getByIds` (batch point-read)
