@@ -25,6 +25,7 @@ export default defineConfig({
     'aggregate/index': 'src/aggregate/index.ts',
     'plugins/index': 'src/plugins/index.ts',
     'lock/index': 'src/lock/index.ts',
+    'usage/index': 'src/usage/index.ts',
   },
   outputOptions: {
     preserveModules: true,

@@ -4,6 +4,19 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-15
+
+### Added — `./usage` subpath (period-bucketed counter contract)
+
+- **`UsageStore`** — driver-agnostic interface for atomic period-bucketed counters: `increment(bucket, amount)` + `summary(actor, period)`. The storage seam under platform accounting (quotas, plan enforcement, usage-based billing). One cell = `(actor, period, kind)`; one write = atomic upsert; one read = all counters for an actor-period pair. Kits ship adapters (`@classytic/mongokit/usage`, `@classytic/sqlitekit/usage`, …) without depending on arc; `@classytic/arc/usage` consumes this contract structurally.
+- **`UsageBucket`** — `{ actor, period, kind }` tuple. `kind` is dot-namespaced: `api.requests`, `ai.tokens.input`, `storage.egress.bytes`.
+- **`usagePeriod(date?)`** — canonical UTC calendar-month key (`"2026-07"`). Monthly is the billing-native granularity.
+- **`createMemoryUsageStore()`** — in-process reference implementation for tests and single-instance apps. Returns `UsageStore & { clear() }`. Multi-replica deployments need a shared adapter.
+
+### Added — `runUsageStoreContract` in `./testing`
+
+- **`runUsageStoreContract(harness)`** — cross-kit conformance suite. Kits import once and pass their adapter; all canonical scenarios run automatically. Same pattern as `runLockAdapterConformance`. `UsageConformanceHarness` is exported from `./testing` for harness typing.
+
 ## [0.10.0] - 2026-07-13
 
 ### Added — `ValidationErrorMeta.path` + `.meta` (field-scoped validation errors)
