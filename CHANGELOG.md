@@ -4,9 +4,9 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.0] - 2026-07-15
+## [0.13.0] - 2026-07-15
 
-### Added — `StandardRepo.transition?()` contract (state-machine CAS with history)
+### Added — `StandardRepo.applyTransition?()` contract (state-machine CAS with history)
 
 - **`TransitionMachine`** — the canonical structural contract for the state
   machine (`{ name, assertTransition }`). Primitives'
@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy as `ClaimTransition`).
 - **`TransitionArgs`** — `{ from, to, field?, set?, push?, where?, by?,
   note?, history?, at? }`.
-- **`StandardRepo.transition?(id, machine, args, options)`** — OPTIONAL
+- **`StandardRepo.applyTransition?(id, machine, args, options)`** — OPTIONAL
   member declaring the state-machine-backed CAS transition mongokit 3.22
   ships as a class primitive: legality pre-flight via the machine (which
   throws the domain's typed error), CAS via `claim`, `$push`ed status

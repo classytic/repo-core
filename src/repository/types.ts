@@ -382,7 +382,7 @@ export interface ClaimTransition {
 
 /**
  * Structural contract for the state machine consumed by
- * `StandardRepo.transition()` — the CANONICAL shape; mongokit's
+ * `StandardRepo.applyTransition()` — the CANONICAL shape; mongokit's
  * `TransitionMachine` and primitives' `StateMachine` (from
  * `@classytic/primitives/state-machine`, whose `defineStateMachine()`
  * satisfies it as-is) are structurally identical by design. Neither
@@ -400,7 +400,7 @@ export interface TransitionMachine {
 }
 
 /**
- * Args for `StandardRepo.transition()` — the state-machine-backed CAS
+ * Args for `StandardRepo.applyTransition()` — the state-machine-backed CAS
  * with status history. See the method JSDoc for semantics.
  */
 export interface TransitionArgs {
@@ -412,6 +412,10 @@ export interface TransitionArgs {
   set?: Record<string, unknown>;
   /** Kit-specific extra append entries merged beside the history append. */
   push?: Record<string, unknown>;
+  /** Counter increments applied alongside the state write. */
+  inc?: Record<string, number>;
+  /** Field paths cleared alongside the state write. */
+  unset?: Record<string, unknown>;
   /** Additional CAS guards, AND-merged into the match (same as `ClaimTransition.where`). */
   where?: Record<string, unknown>;
   by?: string;
@@ -1550,7 +1554,7 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
 
   /**
    * State-machine-backed CAS transition with status history — the
-   * canonical domain-verb shape (mongokit 3.22 `Repository.transition`).
+   * canonical domain-verb shape (mongokit 3.22 `Repository.applyTransition`).
    * One call: machine legality pre-flight (the machine throws the
    * DOMAIN's typed error), CAS via `claim`, appended history entry
    * (`{ status: to, occurredAt, by?, note? }` onto `args.history` /
@@ -1568,7 +1572,7 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    * required once sqlitekit implements it (SQL kits compile the
    * history append to their JSON-array/audit-table strategy).
    */
-  transition?(
+  applyTransition?(
     id: string,
     machine: TransitionMachine,
     args: TransitionArgs,
