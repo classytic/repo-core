@@ -78,6 +78,8 @@ export type {
   ChangeEvent,
   ClaimTransition,
   ClaimVersionTransition,
+  TransitionArgs,
+  TransitionMachine,
   CursorOptions,
   DeleteManyResult,
   DeleteOptions,

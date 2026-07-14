@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.11.0] - 2026-07-15
 
+### Added — `StandardRepo.transition?()` contract (state-machine CAS with history)
+
+- **`TransitionMachine`** — the canonical structural contract for the state
+  machine (`{ name, assertTransition }`). Primitives'
+  `defineStateMachine()` output and mongokit's local `TransitionMachine`
+  are structurally identical by design; nobody imports anybody (same
+  policy as `ClaimTransition`).
+- **`TransitionArgs`** — `{ from, to, field?, set?, push?, where?, by?,
+  note?, history?, at? }`.
+- **`StandardRepo.transition?(id, machine, args, options)`** — OPTIONAL
+  member declaring the state-machine-backed CAS transition mongokit 3.22
+  ships as a class primitive: legality pre-flight via the machine (which
+  throws the domain's typed error), CAS via `claim`, `$push`ed status
+  history, and accurate race-loss diagnosis (machine error from the row's
+  CURRENT state / 404 `TRANSITION_TARGET_MISSING` / 409
+  `TRANSITION_RACE_LOST`). Unlike `claim`/`claimVersion` it THROWS rather
+  than returning `null` — it owns the error liturgy domain packages used
+  to copy-paste. Promote to required once sqlitekit implements it.
+
 ### Added — `./usage` subpath (period-bucketed counter contract)
 
 - **`UsageStore`** — driver-agnostic interface for atomic period-bucketed counters: `increment(bucket, amount)` + `summary(actor, period)`. The storage seam under platform accounting (quotas, plan enforcement, usage-based billing). One cell = `(actor, period, kind)`; one write = atomic upsert; one read = all counters for an actor-period pair. Kits ship adapters (`@classytic/mongokit/usage`, `@classytic/sqlitekit/usage`, …) without depending on arc; `@classytic/arc/usage` consumes this contract structurally.

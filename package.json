@@ -1,7 +1,7 @@
 {
   "name": "@classytic/repo-core",
   "version": "0.11.0",
-  "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design \u00e2\u20ac\u201d no plugins ship here; each kit owns its own.",
+  "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design â€” no plugins ship here; each kit owns its own.",
   "type": "module",
   "sideEffects": false,
   "files": [

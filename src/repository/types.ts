@@ -381,6 +381,48 @@ export interface ClaimTransition {
 }
 
 /**
+ * Structural contract for the state machine consumed by
+ * `StandardRepo.transition()` — the CANONICAL shape; mongokit's
+ * `TransitionMachine` and primitives' `StateMachine` (from
+ * `@classytic/primitives/state-machine`, whose `defineStateMachine()`
+ * satisfies it as-is) are structurally identical by design. Neither
+ * repo-core nor the kits import primitives — compatibility is
+ * structural, same policy as `ClaimTransition` above.
+ *
+ * `assertTransition` MUST throw (the domain's typed error, via the
+ * machine's own error factory) when `from → to` is illegal. Kits never
+ * invent their own transition-error vocabulary — the machine owns it.
+ */
+export interface TransitionMachine {
+  /** Aggregate name — surfaces in race/missing error messages. */
+  readonly name: string;
+  assertTransition(entityId: string, from: string, to: string): void;
+}
+
+/**
+ * Args for `StandardRepo.transition()` — the state-machine-backed CAS
+ * with status history. See the method JSDoc for semantics.
+ */
+export interface TransitionArgs {
+  from: string | readonly string[];
+  to: string;
+  /** State field (dotted paths allowed on kits that support them). Default `'status'`. */
+  field?: string;
+  /** Set-payload applied alongside the state write (field-shape). */
+  set?: Record<string, unknown>;
+  /** Kit-specific extra append entries merged beside the history append. */
+  push?: Record<string, unknown>;
+  /** Additional CAS guards, AND-merged into the match (same as `ClaimTransition.where`). */
+  where?: Record<string, unknown>;
+  by?: string;
+  note?: string;
+  /** History field name (default `'statusHistory'`), or `false` to skip the append. */
+  history?: string | false;
+  /** Timestamp for the history entry — default `now`. */
+  at?: Date;
+}
+
+/**
  * Transition spec for `StandardRepo.claimVersion()` — optimistic-
  * concurrency CAS via a version stamp. Sibling to `ClaimTransition`;
  * different mental model:
@@ -1505,6 +1547,33 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
     update: Record<string, unknown>,
     options?: WriteOptions,
   ): Promise<TDoc | null>;
+
+  /**
+   * State-machine-backed CAS transition with status history — the
+   * canonical domain-verb shape (mongokit 3.22 `Repository.transition`).
+   * One call: machine legality pre-flight (the machine throws the
+   * DOMAIN's typed error), CAS via `claim`, appended history entry
+   * (`{ status: to, occurredAt, by?, note? }` onto `args.history` /
+   * `statusHistory`), and accurate race-loss diagnosis — on CAS miss
+   * the kit re-reads the row and throws the machine's error from the
+   * row's CURRENT state, a 404-shaped `TRANSITION_TARGET_MISSING`
+   * error when the row vanished, or a 409 `TRANSITION_RACE_LOST`
+   * when the move is still legal (caller may re-read and retry).
+   *
+   * Unlike `claim`/`claimVersion`, this method THROWS instead of
+   * returning `null` — it exists precisely to own the error liturgy
+   * that every domain package copy-pasted around `claim`.
+   *
+   * **Optional (for now).** Mongokit ≥3.22 ships it; promote to
+   * required once sqlitekit implements it (SQL kits compile the
+   * history append to their JSON-array/audit-table strategy).
+   */
+  transition?(
+    id: string,
+    machine: TransitionMachine,
+    args: TransitionArgs,
+    options?: WriteOptions,
+  ): Promise<TDoc>;
 
   /**
    * Classify an error from a write as a unique-constraint violation.
