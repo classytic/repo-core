@@ -14,8 +14,6 @@ export { runStandardRepoConformance } from './conformance.js';
 export type { LockConformanceHarness } from './lock-conformance.js';
 
 export { runLockAdapterConformance } from './lock-conformance.js';
-export type { UsageConformanceHarness } from './usage-conformance.js';
-export { runUsageStoreContract } from './usage-conformance.js';
 export type {
   AggregateOpsSupport,
   ConformanceContext,
@@ -23,3 +21,5 @@ export type {
   ConformanceFeatures,
   ConformanceHarness,
 } from './types.js';
+export type { UsageConformanceHarness } from './usage-conformance.js';
+export { runUsageStoreContract } from './usage-conformance.js';
