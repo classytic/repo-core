@@ -4,6 +4,80 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-07-16
+
+### Added — canonical `matchesRecordFilter` (the `DataAdapter.matchesFilter` home)
+
+- **`matchesRecordFilter(item, record)`** + **`policyRecordToFilter(record)`**
+  (`@classytic/repo-core/filter`) — THE single, shared implementation of the
+  `DataAdapter.matchesFilter` seam. Evaluates arc's Mongo-record `_policyFilters`
+  (`{ ownerId }`, `{ organizationId }`, `{ $or: [{ ownerId }, { _id: { $in } }] }`)
+  against an already-fetched document IN PROCESS, by converting to the portable
+  `Filter` IR and delegating to `matchFilter` — the SAME IR kits compile to
+  SQL/Mongo, so in-memory and DB enforcement agree by construction. Every kit's
+  adapter now delegates here; **no per-kit matcher, one contract, one IR.**
+  Operator scope: `$or`/`$and`/`$nor`/`$not`, `$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte`,
+  `$in`/`$nin`, `$exists`, implicit-eq; fails LOUD on anything else. (Distinct from
+  `recordToFilter`, the bare-operator query normalizer that does not accept
+  `$`-prefixed or logical operators.)
+- **`matchFilter` is now fully array + id + date aware** (additive superset;
+  primitive/Date-vs-Date behavior unchanged — strict cases still short-circuit):
+  - **id coercion** — an id-like object with a meaningful `toString` (Mongo
+    `ObjectId`, `Buffer`, `Decimal128`) matches its string form, so one shared
+    matcher serves Mongo (`ObjectId` `_id`) and SQL (primitive ids) alike.
+  - **array semantics** — dot-paths fan out over subdocument arrays
+    (`items.sku` on `[{sku},{sku}]`), and a scalar condition on a leaf array
+    field matches when ANY element satisfies it (`{ tags: 'x' }`,
+    `{ scores: { $gt: 5 } }`, regex on array elements). All array unwrapping is
+    concentrated in one helper; the comparators stay pure scalar.
+  - **Date⇄ISO-string range** — `compare` coerces the string side to a date
+    instant when the other side is a genuine `Date` (mirrors `equals`), and
+    never claims ordering across a number/string type boundary (fails closed
+    instead of matching spuriously).
+  - **prototype-pollution-safe reads** — path resolution uses `Object.hasOwn`,
+    so a crafted `{ '__proto__.x': … }` / `{ constructor.name: … }` filter can
+    never traverse the prototype chain.
+- **Ability parity across kits**: mongokit's earlier standalone matcher
+  (subdocument-array fan-out, array-contains, `$regex`, ObjectId coercion) is now
+  fully covered by the shared engine — nothing was lost in consolidation.
+- **MongoDB-parity hardening** (validated against the MongoDB manual + sift.js +
+  mingo — the two industry-standard in-memory matchers). The authorization-critical
+  rule "an absent field participates in comparisons as null/undefined" is now
+  fully honored:
+  - `{ field: null }`, `$ne`, `$nin`, and a `null` MEMBER of `$in`/`$nin` all
+    match a MISSING field (a policy filter `{ status: { $ne: 'archived' } }`
+    correctly returns docs that lack the field, exactly as MongoDB does — the top
+    silent-authorization-divergence trap). `$ne: null` remains the exception
+    (requires present + non-null).
+  - `$in` accepts RegExp-literal members (`{ name: { $in: [/^a/] } }`).
+  - Comparison ops are type-bracketed (no cross-type ordering; `$gt: null` matches
+    nothing); NaN equals NaN for `$eq` (via `Object.is`, not `===`).
+  - Numeric dot-path segments resolve as positional array indices (`items.0.sku`).
+  - Documented DELIBERATE divergences: `$exists` = present-and-non-null (matches
+    the IR `exists` op + SQL `IS NOT NULL` + sift; Mongo/mingo count present-null
+    as existing); `Date`⇄ISO-string range leniency; array-literal operands are
+    element-matched not exact-matched.
+- New: 41-case matcher suite incl. the 11 researched MongoDB gotchas + adversarial
+  (prototype pollution, NaN/Infinity, boolean/zero/empty-string, empty
+  `$in`/`$or`/`$and`/`$nor`, fail-loud on unsupported operators) + a 100k-doc
+  performance smoke (linear, cached regex).
+- **Security hardening** (from a review against sift.js/mingo CVEs + the OWASP
+  NoSQL-injection / ReDoS / prototype-pollution literature):
+  - **Prototype-key denylist** on path segments — `__proto__` / `constructor` /
+    `prototype` resolve to nothing (fail-closed), string-normalized (the
+    object-path CVE-2021-23434 lesson: an array-typed segment bypassed a `===`
+    check). Closes the "match an inherited member → wrong auth answer" case and
+    the `JSON.parse('{"__proto__":…}')` own-property vector, on top of the
+    already-`Object.hasOwn` reads.
+  - **`$regex` input-length cap** (64 KiB) — ReDoS is `pattern × input`; a field
+    value longer than the cap is treated as no-match (fail-closed) so one slow
+    match can't stall the event loop and amplify across a realtime fan-out
+    (matcher runs once per subscriber per record). Pattern-side ReDoS is a
+    non-issue for framework-supplied (trusted) patterns.
+  - Reaffirmed **fail-closed** posture: comparisons never coerce across a
+    number/string type boundary (return no-match rather than JS-coerced nonsense
+    — the classic over-visibility leak), and unsupported operators throw.
+
 ## [0.13.0] - 2026-07-15
 
 ### Added — `StandardRepo.applyTransition?()` contract (state-machine CAS with history)

@@ -39,6 +39,9 @@ export {
 export { recordToFilter } from './from-record.js';
 export { isFilter } from './guard.js';
 export { asPredicate, matchFilter } from './match.js';
+// Arc policy-filter dialect ($-prefixed + logical ops) → IR + in-memory
+// match. THE canonical `DataAdapter.matchesFilter` — kits delegate here.
+export { matchesRecordFilter, policyRecordToFilter } from './match-record.js';
 export { buildTenantScope, mergeScope, SCOPE_ANY } from './scope.js';
 export type {
   Filter,
