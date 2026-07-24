@@ -1,5 +1,7 @@
 # @classytic/repo-core
 
+[![Sponsor](https://img.shields.io/github/sponsors/classytic?style=flat-square&label=Sponsor&logo=GitHub&color=EA4AAA)](https://github.com/sponsors/classytic)
+
 **Driver-agnostic repository primitives.** Hooks, Filter IR, operations registry, pagination, URL query parsing, cache contract — the shared foundation for `@classytic/mongokit`, `@classytic/sqlitekit`, and future `@classytic/pgkit` / `@classytic/prismakit`.
 
 Repo-core is **infrastructure for kit authors.** End-users install a kit (mongokit / sqlitekit) and import their full API from that one namespace. Repo-core is what each kit's runtime is built on — you typically won't import it directly in application code.

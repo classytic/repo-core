@@ -4,6 +4,31 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-07-24
+
+### Added — `purgeByFilter`: range/filter-scoped purge + anonymize
+
+- **`StandardRepo.purgeByFilter?(filter, strategy, options)`** — the
+  range/filter-scoped sibling of `purgeByField`. Where `purgeByField` matches
+  a single `field = value` equality, this optional method takes the full
+  portable `FilterInput` (Filter IR or a plain kit-native record) and runs any
+  `TenantPurgeStrategy` (`hard` / `soft` / `anonymize` / `skip`) over the
+  matched slice. THE compliance primitive for "purge/anonymize a dimension
+  across a RANGE while RETAINING measures" — redact a PII column across a
+  `civilDate` window, hard-delete rows past a retention cutoff, soft-delete a
+  compound cohort. Returns the same `TenantPurgeResult` envelope; chunking,
+  index requirement, idempotency, plugin composition, and narrowed-write
+  re-assertion are identical to `purgeByField`. Gate on the new
+  `capabilities.purgeByFilter`.
+- **`RepoCapabilities.purgeByFilter?: boolean`** — feature-detection flag,
+  mirroring `purgeByField`.
+- **`PurgePort` doc** clarifies the two bound-predicate forms (equality-bound
+  vs filter-bound) both satisfy the single port interface, so `runChunkedPurge`
+  drives both unchanged.
+
+Strictly additive: `purgeByField`, `TenantPurgeStrategy`, and `runChunkedPurge`
+are unchanged; both new members are optional.
+
 ## [0.14.0] - 2026-07-16
 
 ### Added — canonical `matchesRecordFilter` (the `DataAdapter.matchesFilter` home)

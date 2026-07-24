@@ -32,11 +32,30 @@ export type WritingPurgeStrategy = Exclude<TenantPurgeStrategy, { type: 'skip' }
  * Driver-facing port the orchestrator drives. Each kit implements one
  * closure over its driver primitives + the purge predicate.
  *
+ * **Bound-predicate forms.** The port binds its selection predicate
+ * internally — the orchestrator never sees it. Two factory shapes both
+ * satisfy this single interface:
+ *
+ *   - **Equality-bound** (`purgeByField`): the predicate is
+ *     `{ [field]: value }` — the classic tenant-scoped cleanup where an
+ *     organization id equals the deleted tenant.
+ *   - **Filter-bound** (`purgeByFilter`): the predicate is a compiled
+ *     range/compound filter (e.g. a `civilDate` window `gte/lte`,
+ *     `{ status: 'archived', createdAt: { $lt: cutoff } }`). This is the
+ *     GDPR/retention "anonymize a PII dimension across a range while
+ *     RETAINING measures" op — no native equality analogue. Mirrors how
+ *     the archive port's factory (`createMongoArchivePort`) binds a
+ *     pre-compiled Filter rather than a `field/value` pair.
+ *
+ * Because `runChunkedPurge` drives ANY `PurgePort`, both factories reuse
+ * the same orchestrator unchanged — only the bound base predicate differs.
+ *
  * **Plugin-bypass invariant.** Implementations MUST bypass tenant
- * scoping in plugin hooks — the caller's `field = value` predicate IS
- * the authoritative scope; a tenant-injecting hook would narrow to the
- * wrong tenant. Pass `bypassTenant: true` on inner Repository calls
- * (which keeps audit / cache hooks active but disables tenant injection).
+ * scoping in plugin hooks — the caller's bound predicate (`field = value`
+ * OR the compiled filter) IS the authoritative scope; a tenant-injecting
+ * hook would narrow to the wrong tenant. Pass `bypassTenant: true` on
+ * inner Repository calls (which keeps audit / cache hooks active but
+ * disables tenant injection).
  *
  * **Throughput contract.** Implementations should issue the minimum
  * number of round-trips a chunk requires:

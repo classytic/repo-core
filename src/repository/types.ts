@@ -1742,6 +1742,46 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
   ): Promise<TenantPurgeResult>;
 
   /**
+   * Range/filter-scoped variant of {@link purgeByField} — processes every
+   * row matching an arbitrary `filter` (not just `field = value`) under the
+   * given {@link TenantPurgeStrategy}. The compliance primitive for
+   * "purge/anonymize a slice across a RANGE while retaining measures":
+   * redact a PII dimension across a `civilDate` window, hard-delete rows
+   * older than a retention cutoff, soft-delete a compound-predicate cohort.
+   *
+   * `purgeByField(field, value, ...)` is the equality special case
+   * (`{ [field]: value }`); this method takes the full portable
+   * {@link FilterInput} (Filter IR or a plain kit-native record), compiled
+   * once by the kit before the chunk loop — the same dual-dialect rule
+   * every other verb follows.
+   *
+   * Everything else is identical to `purgeByField`:
+   * - Strategy → kit-native primitive (`hard`/`soft`/`anonymize`/`skip`).
+   * - **Chunking mandatory** — implementations MUST honor `batchSize`.
+   * - **Index requirement** — the filter's leading field(s) MUST be indexed
+   *   or every chunk re-scans the collection / table.
+   * - **Idempotent** — re-running with the same arguments is safe; already
+   *   purged rows simply don't match the next pass.
+   * - **Plugin composition** — the chunked ops route through the kit's
+   *   `before:deleteMany` / `before:updateMany` hooks so audit /
+   *   cache-invalidation / observability plugins fire naturally.
+   * - **Narrowed-write re-assertion** — kits re-assert the base filter on
+   *   the `{ _id: { $in: ids }, ...filter }` write, defending against a row
+   *   that left the matching set between the id select and the write.
+   *
+   * Optional method; gate on `capabilities.purgeByFilter`.
+   *
+   * @param filter   Predicate selecting rows to purge (Filter IR or record).
+   * @param strategy Strategy declaration — see {@link TenantPurgeStrategy}.
+   * @param options  Chunking, session, progress, abort signal.
+   */
+  purgeByFilter?(
+    filter: FilterInput,
+    strategy: TenantPurgeStrategy,
+    options?: TenantPurgeOptions,
+  ): Promise<TenantPurgeResult>;
+
+  /**
    * Chunked cold-storage extraction — move every row matching `filter`
    * into a host-provided {@link ArchiveSink}, then remove it from the hot
    * store. THE data-lifecycle primitive for retention windows and

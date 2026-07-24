@@ -128,6 +128,15 @@ export interface RepoCapabilities {
    */
   purgeByField?: boolean;
   /**
+   * `purgeByFilter(filter, strategy, options)` — range/filter-scoped
+   * variant of `purgeByField`. Processes rows matching an arbitrary
+   * compiled filter (a `civilDate` window, a retention cutoff, a compound
+   * cohort) rather than a single `field = value` equality — the GDPR /
+   * retention "anonymize a slice across a RANGE while retaining measures"
+   * primitive.
+   */
+  purgeByFilter?: boolean;
+  /**
    * `archiveByFilter(filter, sink, options)` — chunked cold-storage
    * extraction (write-before-delete, at-least-once). The data-lifecycle
    * twin of `purgeByField`.
