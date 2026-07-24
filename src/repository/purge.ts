@@ -77,6 +77,23 @@ export interface PurgePort {
    * Returning `0` signals "no more matching rows"; the orchestrator
    * exits. Returning a partial batch (`< limit`) is also a terminal
    * signal — saves one round-trip on the last chunk.
+   *
+   * **PROGRESSION CONTRACT (mandatory).** Successive calls MUST advance
+   * through the match set for EVERY strategy. `hard` advances naturally
+   * (deleted rows leave the predicate's match set) — but `soft` and
+   * `anonymize` mutate rows that usually STILL satisfy the base
+   * predicate, so a port that re-runs `find(filter).limit(n)` re-selects
+   * the same first chunk forever and the orchestrator never terminates.
+   * Implementations must use **stable keyset progression**: order by the
+   * primary key and keep an internal `pk > lastSeen` cursor across calls
+   * (advance it only after the chunk's write succeeds, so a retried
+   * chunk re-selects the same rows). Offsets (`skip`) are not acceptable
+   * — they shift under concurrent writes and re-scan the head.
+   *
+   * A port instance is single-run state: build a fresh port per
+   * `runChunkedPurge` invocation, never share one across runs.
+   * `runPurgeConformance` (from `@classytic/repo-core/testing`) proves a
+   * kit satisfies this contract with match sets larger than `batchSize`.
    */
   purgeChunk(strategy: WritingPurgeStrategy, limit: number): Promise<number>;
 }

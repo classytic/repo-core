@@ -1714,10 +1714,13 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    *   - sqlite: `EXPLAIN QUERY PLAN SELECT … WHERE field = ?` shows
    *     `SEARCH … USING INDEX`, never `SCAN`.
    *
-   * **Idempotent.** Re-running with the same arguments is safe — rows
-   * already deleted/anonymized simply don't match the next pass.
-   * Crucial for at-least-once cascade workers that may retry after
-   * partial failure.
+   * **Idempotent by outcome.** Re-running with the same arguments is
+   * safe: `hard` rows are gone, and `soft`/`anonymize` rows converge to
+   * the same terminal field values on a second pass (the rows generally
+   * DO still match the predicate — which is exactly why ports must use
+   * keyset progression, not re-selection, to advance WITHIN a run; see
+   * the {@link PurgePort} progression contract). Crucial for
+   * at-least-once cascade workers that may retry after partial failure.
    *
    * **Plugin composition.** Kits route the underlying chunked ops
    * through their standard `before:deleteMany` / `before:updateMany`

@@ -23,3 +23,8 @@ export type {
 } from './types.js';
 export type { UsageConformanceHarness } from './usage-conformance.js';
 export { runUsageStoreContract } from './usage-conformance.js';
+export type {
+  PurgeConformanceContext,
+  PurgeConformanceHarness,
+} from './purge-conformance.js';
+export { runPurgeConformance } from './purge-conformance.js';

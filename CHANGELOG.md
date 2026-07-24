@@ -4,6 +4,31 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-07-24
+
+### Added — `runPurgeConformance`: cross-kit chunked-purge contract suite
+
+- **`runPurgeConformance(harness)`** (from `@classytic/repo-core/testing`) —
+  proves a kit's purge port makes **stable progress for every strategy** when
+  the match set exceeds `batchSize`. Every scenario seeds more rows than one
+  batch; a chunk budget converts a non-progressing port's infinite loop into a
+  crisp assertion failure. Scenarios: hard drain, soft multi-batch WITHOUT
+  caller-supplied exclusion predicates, anonymize static + function-form,
+  exact-batch boundary, skip, empty scope, abort-between-chunks.
+- **`PurgePort` progression contract (documented, mandatory)** — successive
+  `purgeChunk` calls MUST advance through the match set for every strategy via
+  stable keyset progression (`pk > lastSeen`, advanced only after the chunk's
+  write succeeds). Re-running the bare predicate only self-advances for
+  `hard`; `soft`/`anonymize` re-select the same first chunk forever. Offsets
+  are explicitly ruled out. A port instance is single-run state.
+
+### Fixed
+
+- `purgeByField` docstring no longer claims soft/anonymized rows "simply don't
+  match the next pass" — they generally DO still match; idempotency holds by
+  outcome convergence, and within-run progression is the port's keyset
+  responsibility.
+
 ## [0.15.0] - 2026-07-24
 
 ### Added — `purgeByFilter`: range/filter-scoped purge + anonymize
