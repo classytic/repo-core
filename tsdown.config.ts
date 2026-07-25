@@ -26,6 +26,7 @@ export default defineConfig({
     'plugins/index': 'src/plugins/index.ts',
     'lock/index': 'src/lock/index.ts',
     'usage/index': 'src/usage/index.ts',
+    'cleanup/index': 'src/cleanup/index.ts',
   },
   outputOptions: {
     preserveModules: true,

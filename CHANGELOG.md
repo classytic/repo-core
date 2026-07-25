@@ -4,6 +4,28 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-07-25
+
+### Added — `./cleanup`: framework-free cleanup provider step contract
+
+- **`@classytic/repo-core/cleanup`** — new subpath (pure types, no runtime).
+  Domain kernels (`@classytic/flow`, `@classytic/order`, `@classytic/facts`,
+  `@classytic/ledger`, …) export `CleanupStep[]` for the data they own; a host
+  framework (`@classytic/arc/cleanup`) folds them into a Cleanup Center recipe.
+  The contract lives in repo-core so kernels stay framework-free: kernels already
+  depend on repo-core (the chunked-purge mechanics) and MUST NOT depend on arc.
+- **`CleanupStep`** — the core provider interface: `id`, `resource`, `destructive`,
+  optional `rebuildActions`; and three lifecycle methods: `estimate(ctx)` (preview
+  without mutating), `execute(ctx)` (chunked, idempotent, cancellation-aware),
+  and optional `verify(ctx)` (post-checks — a delete count alone is never success).
+- **Supporting types**: `CleanupStepContext` (injected `now`, `signal`, `ambient`,
+  `parameters`, `logger`), `CleanupStepExecuteContext` (adds `onProgress` +
+  `throwIfCancelled`), `CleanupStepEstimate` (row count, `retained`, `blockers`,
+  `warnings`), `CleanupStepOutcome` (`processed`, `ok`, `error`, `cursor`),
+  `CleanupStepCheck` (`name`, `ok`, `detail`), `CleanupStepProgress`, `CleanupStepLogger`.
+
+Purely additive — zero runtime code, type-only subpath export.
+
 ## [0.16.0] - 2026-07-24
 
 ### Added — `runPurgeConformance`: cross-kit chunked-purge contract suite
