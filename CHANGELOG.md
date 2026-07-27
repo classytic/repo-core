@@ -4,6 +4,43 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-07-27
+
+### Added — `definePurgeStep` builder (`./cleanup`) and `resolveTenantField` (`./tenant`)
+
+#### `./cleanup` — `definePurgeStep`
+
+- **`definePurgeStep(repository, spec)`** — standard builder for the most common
+  `CleanupStep` shape: a chunked `purgeByField` over a single scope value.
+  Nearly every provider step in a domain kernel is this pattern; the builder owns
+  the invariant core so callers only declare what differs:
+  - **fail-closed scoping** — missing scope value or unavailable repository is a
+    `BLOCKER` (not a silent no-op and never an unscoped purge that would hit every
+    tenant); blocked by `SCOPE_REQUIRED:<param>` / `REPOSITORY_UNAVAILABLE:<id>`.
+  - **cancellation** — `throwIfCancelled` is called before work starts and the
+    `signal` is threaded to the kit so a cancel lands between committed chunks.
+  - **honest failure** — a failing purge returns `ok: false` so the recipe composer
+    stops (retention §8); thrown errors are caught and reported, never swallowed.
+  - **verification** — absence is re-queried after the run via `countDocuments`
+    (`spec.verifyFilter` for steps whose match filter differs from the absence proof).
+- **`PurgeStepSpec`** — declaration object: `id`, `resource`, `parameter`, `field`,
+  `strategy`, optional `retained`, `warnings`, `batchSize`, `guard(scope, ctx)`,
+  `verifyFilter(scope)`, `verifyName`.
+- **`PurgeStepRepository`** — structural subset of `StandardRepo` satisfied by any
+  kit repository that implements `purgeByField` + `countDocuments`.
+- **`SCOPE_REQUIRED`** / **`REPOSITORY_UNAVAILABLE`** — blocker-code prefix constants.
+
+#### `./tenant` — `resolveTenantField`
+
+- **`resolveTenantField(config?)`** — returns the single `tenantField` string a
+  resource layer needs for `defineResource({ tenantField })`, or `false` when the
+  config disables tenant scoping (`false` / `{ enabled: false }` / `{ strategy: 'none' }`).
+  Four spine modules hand-rolled equivalent logic independently, each re-deriving
+  `'organizationId'` as the default; one copy omitted the disable branch, making
+  that package silently un-configurable. This function is the single definition.
+
+Both additions are purely additive — no breaking changes.
+
 ## [0.17.0] - 2026-07-25
 
 ### Added — `./cleanup`: framework-free cleanup provider step contract

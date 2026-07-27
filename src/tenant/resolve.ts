@@ -126,3 +126,24 @@ export function resolveTenantConfig(config?: TenantConfig | boolean): ResolvedTe
     enabled: cleaned.enabled ?? true,
   };
 }
+
+/**
+ * The single `tenantField` value a resource layer wants, or `false` when the
+ * option disables scoping entirely.
+ *
+ * Packages composing an arc resource need exactly this shape for
+ * `defineResource({ tenantField })`, and four spine modules independently
+ * hand-rolled it — each re-deriving `'organizationId'` as the default and
+ * unwrapping `{ tenantField }` by hand. One of those copies omitted the
+ * disable branch, so that package silently could not be configured
+ * company-wide. This wraps {@link resolveTenantConfig} so the default, the
+ * disable semantics, and the object-unwrapping have ONE definition.
+ *
+ * `false` / `{ enabled: false }` / `{ strategy: 'none' }` all mean "no tenant
+ * scoping" and all return `false` — callers get one thing to branch on.
+ */
+export function resolveTenantField(config?: TenantConfig | boolean): string | false {
+  const resolved = resolveTenantConfig(config);
+  if (!resolved.enabled || resolved.strategy === 'none') return false;
+  return resolved.tenantField;
+}

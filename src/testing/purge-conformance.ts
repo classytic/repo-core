@@ -26,7 +26,11 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { TenantPurgeOptions, TenantPurgeResult, TenantPurgeStrategy } from '../repository/types.js';
+import type {
+  TenantPurgeOptions,
+  TenantPurgeResult,
+  TenantPurgeStrategy,
+} from '../repository/types.js';
 
 /** Everything the shared scenarios need from a kit. */
 export interface PurgeConformanceContext {

@@ -8,7 +8,7 @@
  * Money, Address, Period).
  */
 
-export { DEFAULT_TENANT_CONFIG, resolveTenantConfig } from './resolve.js';
+export { DEFAULT_TENANT_CONFIG, resolveTenantConfig, resolveTenantField } from './resolve.js';
 export type {
   ResolvedTenantConfig,
   TenantConfig,
