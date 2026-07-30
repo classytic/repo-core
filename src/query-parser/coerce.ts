@@ -5,13 +5,17 @@
  * numbers, numeric-looking strings becoming Dates).
  */
 
+import { ISO_DATE_PATTERN } from '../filter/coerce-dates.js';
 import type { QueryParserOptions } from './types.js';
 
 const BOOLEAN_STRINGS = new Set(['true', '1', 'yes', 'on']);
 const FALSEY_STRINGS = new Set(['false', '0', 'no', 'off']);
-// Tight ISO-8601 — catches 2026-04-19, 2026-04-19T10:00:00Z, millisecond precision.
-const ISO_DATE_RE =
-  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+// Tight ISO-8601 — catches 2026-04-19, 2026-04-19T10:00:00Z, millisecond
+// precision. Single source of truth lives in `filter/coerce-dates.ts`, which
+// the aggregation/`$match` coercion path also uses — one pattern, so the URL
+// boundary and the compile boundary can never disagree on what "looks like a
+// date".
+const ISO_DATE_RE = ISO_DATE_PATTERN;
 
 /**
  * Coerce a single URL value to its field-declared type, or to a best-guess

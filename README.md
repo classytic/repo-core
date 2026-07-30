@@ -239,3 +239,10 @@ See [docs/data-lifecycle.md](./docs/data-lifecycle.md) for the billion-row runbo
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+
+## Trademark
+
+The code is MIT-licensed. **"Classytic", "arc", and the logos are trademarks of
+Classytic LLC** and are **not** licensed under MIT — see [TRADEMARK.md](TRADEMARK.md).
+Forks must be renamed; the license covers the code, not the brand.

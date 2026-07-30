@@ -36,6 +36,11 @@ export {
   startsWith,
   TRUE,
 } from './builders.js';
+export {
+  coerceFilterDates,
+  ISO_DATE_PATTERN,
+  tryCoerceIsoDate,
+} from './coerce-dates.js';
 export { recordToFilter } from './from-record.js';
 export { isFilter } from './guard.js';
 export { asPredicate, matchFilter } from './match.js';

@@ -4,6 +4,16 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-07-29
+
+### Added — `coerceFilterDates` + ISO date helpers (`./filter`)
+
+- **`coerceFilterDates(filter)`** — walks a record-shape filter (Mongo-dialect or bare bracket-op syntax) and coerces ISO-8601 strings on range operators (`gt`/`gte`/`lt`/`lte` and `$`-prefixed equivalents) to `Date`, recursing through `$and`/`$or`/`$nor`/`$not` logical wrappers. Returns a new object; the input is never mutated. Equality operators are deliberately excluded — a string that happens to look like a date is far more likely a string id than a date equality predicate. Fixes silent empty results on aggregation `$match` stages: MongoDB `$match` (unlike `find`) performs no schema casting, so a string compared to a Date column matches nothing.
+- **`tryCoerceIsoDate(value)`** — coerces one unknown value to a `Date` when it is an unambiguous ISO-8601 string; returns anything else untouched. Safe to apply unconditionally.
+- **`ISO_DATE_PATTERN`** — the single regex source of truth for tight ISO-8601 detection (date-only through millisecond precision + optional timezone). `query-parser/coerce.ts` now imports this instead of keeping a duplicate pattern — one definition means the URL boundary and the compile boundary can never disagree on what "looks like a date".
+
+All three are exported from `@classytic/repo-core/filter`. Purely additive.
+
 ## [0.18.0] - 2026-07-27
 
 ### Added — `definePurgeStep` builder (`./cleanup`) and `resolveTenantField` (`./tenant`)
