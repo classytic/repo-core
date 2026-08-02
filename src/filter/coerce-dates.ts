@@ -88,17 +88,43 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * // → { $and: [{ createdAt: { $gte: Date(2026-04-01) } }] }
  * ```
  */
-export function coerceFilterDates(filter: Record<string, unknown>): Record<string, unknown> {
+export interface CoerceFilterDatesOptions {
+  /**
+   * Schema oracle: given a field path, is it actually date-typed?
+   *
+   * WITHOUT this the coercion is a guess based only on how the VALUE looks, and the guess
+   * is wrong for any string column whose contents happen to be ISO-shaped — a civil date
+   * (`'2026-08-02'`), a version, a period key. Coercing there produces the exact failure
+   * this function exists to prevent, in reverse: the bound becomes a Date, BSON will not
+   * compare Date to String, and the range silently matches NOTHING.
+   *
+   * That cost real time. A sales-fact reconciler filtered `civilDate` — a `String` field
+   * holding `'YYYY-MM-DD'` — with `$gte`/`$lte`. The bounds were coerced to Dates, the
+   * aggregate returned zero rows for every window, and the report therefore accused the
+   * PROJECTOR of having written nothing, for every cell, forever. The projection was
+   * correct the whole time; the reconciler was comparing a Date to a String.
+   *
+   * Return `false` to leave the operand exactly as given. Omit the option entirely to keep
+   * the old value-shape-only behaviour (correct for callers with no schema to consult,
+   * such as a URL query parser).
+   */
+  isDateField?: (field: string) => boolean;
+}
+
+export function coerceFilterDates(
+  filter: Record<string, unknown>,
+  options?: CoerceFilterDatesOptions,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(filter)) {
     if (LOGICAL_ARRAY_OPS.has(key) && Array.isArray(value)) {
-      out[key] = value.map((entry) => (isPlainObject(entry) ? coerceFilterDates(entry) : entry));
+      out[key] = value.map((entry) => (isPlainObject(entry) ? coerceFilterDates(entry, options) : entry));
       continue;
     }
 
     if (LOGICAL_OBJECT_OPS.has(key) && isPlainObject(value)) {
-      out[key] = coerceFilterDates(value);
+      out[key] = coerceFilterDates(value, options);
       continue;
     }
 
@@ -109,8 +135,11 @@ export function coerceFilterDates(filter: Record<string, unknown>): Record<strin
     if (isPlainObject(value)) {
       let changed = false;
       const coerced: Record<string, unknown> = {};
+      // The oracle is consulted ONCE per field, not per operator — a field is date-typed
+      // or it is not, and asking per operand would let `$gte` and `$lte` disagree.
+      const coercible = options?.isDateField === undefined || options.isDateField(key);
       for (const [op, operand] of Object.entries(value)) {
-        if (RANGE_OPS.has(op)) {
+        if (coercible && RANGE_OPS.has(op)) {
           const next = tryCoerceIsoDate(operand);
           coerced[op] = next;
           if (next !== operand) changed = true;
