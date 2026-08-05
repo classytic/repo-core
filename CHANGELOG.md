@@ -4,6 +4,19 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-04
+
+### Added
+
+- **`ResolveBetterAuthCollectionsOptions.exclude`** — canonical collection names
+  to omit from `resolveBetterAuthCollections()` output. Applied before
+  `modelOverrides` / `usePlural` so a caller names the canonical collection
+  (`'user'`) and never has to predict the final model name. Solves the collision
+  when a host registers stub models for BA collections it merely references and a
+  full `createBetterAuthOverlay` for the one it exposes CRUD on — both for the
+  same collection would cause mongoose to lock the schema on first `model()`,
+  silently dropping `additionalFields` and causing the overlay to refuse.
+
 ## [0.19.0] - 2026-07-29
 
 ### Added — `coerceFilterDates` + ISO date helpers (`./filter`)
