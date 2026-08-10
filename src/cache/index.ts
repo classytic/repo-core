@@ -40,7 +40,10 @@
 
 // ── Engine — direct API for action results / custom routes ───────────
 export { CacheEngine, type CacheEngineOptions, type SingleFlightClaim } from './engine.js';
-export { createMemoryCacheAdapter } from './memory-adapter.js';
+export {
+  createMemoryCacheAdapter,
+  type MemoryCacheAdapterOptions,
+} from './memory-adapter.js';
 
 // ── Per-call options + result envelope ───────────────────────────────
 export type { CacheOptions, CacheReadResult } from './options.js';

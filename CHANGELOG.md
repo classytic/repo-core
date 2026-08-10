@@ -4,6 +4,18 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-10
+
+### Added — LRU-bounded `createMemoryCacheAdapter`
+
+- `createMemoryCacheAdapter(options?)` now accepts `MemoryCacheAdapterOptions` with a `maxEntries` cap (default `10,000`). Past the cap the least-recently-used entry is evicted — read promotion (delete + re-insert) keeps the map ordered by recency so eviction is O(1). A TTL alone does not bound the map: entries only expire when read, so a high-cardinality keyspace (per-tenant, per-commit, per-filter keys) grows monotonically until the process dies. Eviction is always safe for a cache, so the bound is on by default. Set `maxEntries: 0` to restore the previous unbounded behaviour.
+- `MemoryCacheAdapterOptions` exported from `@classytic/repo-core/cache`.
+
+### Added — timezone-aware date buckets (`AggDateBucket.timezone`)
+
+- `AggDateBucket.timezone` — IANA zone the bucket boundaries are drawn in; absent means UTC. A UTC day is not a business day in any non-UTC deployment: rows from 18:00 to midnight local fall in the previous UTC day, silently reporting the wrong period in daily/monthly rollups.
+- `AggregateOpsSupport.dateBucketTimezone` capability flag — a kit that cannot draw DST-correct boundaries (e.g. SQLite, no tz database) MUST declare `dateBucketTimezone: false` and throw when the field is set rather than silently bucketing in UTC. Mongokit (`$dateTrunc` / `$dateToString` both accept `timezone`) declares `true`.
+
 ## [0.20.0] - 2026-08-04
 
 ### Added

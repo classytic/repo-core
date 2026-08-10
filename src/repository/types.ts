@@ -962,6 +962,23 @@ export interface AggDateBucket {
   field: string;
   /** Bucket granularity. */
   interval: AggDateBucketInterval;
+  /**
+   * IANA zone the bucket boundaries are drawn in. Absent means UTC.
+   *
+   * A UTC day is not a BUSINESS day. In a UTC+6 deployment every row from
+   * 18:00 to midnight local falls in the PREVIOUS UTC day, and at month-end in
+   * the previous month — so a daily or monthly rollup silently reports the
+   * wrong period. Nothing throws; the chart simply draws the wrong day. The
+   * absence of this field is why every business-day rollup had to abandon the
+   * portable IR and hand-roll a kit-native pipeline, and hand-rolling made the
+   * zone optional again.
+   *
+   * REQUIRES the `dateBucketTimezone` capability. A kit that cannot draw
+   * DST-correct boundaries (SQLite has no tz database) MUST THROW when this is
+   * set — never fall back to UTC. Falling back returns a plausible number for
+   * the wrong period, which is the failure this field exists to prevent.
+   */
+  timezone?: string;
 }
 
 /**

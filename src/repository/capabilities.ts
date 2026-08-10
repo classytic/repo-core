@@ -53,6 +53,15 @@ export interface AggregateOpsSupport {
    */
   topN?: boolean;
   /**
+   * `AggDateBucket.timezone` — bucket boundaries drawn in an IANA zone
+   * rather than UTC. Mongokit supports it natively (`$dateTrunc` /
+   * `$dateToString` both take `timezone`). SQLite has no tz database, so
+   * sqlitekit cannot draw DST-correct boundaries and MUST THROW rather
+   * than silently bucketing in UTC — a wrong-period number that looks
+   * right is worse than a refusal.
+   */
+  dateBucketTimezone?: boolean;
+  /**
    * `dateBuckets: { ..., interval: { every, unit } }` custom-bin
    * form. Kits that only support named-bucket form can leave this
    * `false`; tests for `'minute'` / `'hour'` named intervals are
