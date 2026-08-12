@@ -1073,6 +1073,65 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
         expect(out.data).toHaveLength(1);
         expect(out.total).toBe(1);
       });
+
+      // ────────────────────────────────────────────────────────────
+      // `pages` on an EMPTY result — one answer, every envelope.
+      //
+      // This field had NO assertion anywhere in this suite, and two
+      // kits drifted in the gap: the primary offset path computed a
+      // plain `ceil` (empty ⇒ 0) while the aggregate and lookup paths
+      // computed `Math.max(1, ceil(...))` (empty ⇒ 1). The formulas
+      // differ ONLY when `total` is 0, which is why every existing
+      // pagination test agreed — the case above has `total: 5`, where
+      // both answer 1.
+      //
+      // It reached a consumer as golden-fixture drift: adding a
+      // `lookups` join to an unchanged list read reroutes it onto the
+      // divergent path and flipped `pages` from 0 to 1.
+      //
+      // 0 is the contract. `pages` is "how many pages of results
+      // exist", and zero rows fill zero pages; it is also what every
+      // kit's primary path already returned, what `countStrategy:
+      // 'none'` returns, and what arc's published empty-envelope
+      // test double asserts.
+      // ────────────────────────────────────────────────────────────
+
+      it('empty result reports pages: 0 (offset envelope)', async () => {
+        const out = (await ctx.repo.getAll({
+          filters: { count: 999_999 } as Partial<TDoc> & Record<string, unknown>,
+          page: 1,
+          limit: 10,
+        })) as { data: unknown[]; total: number; pages: number };
+        expect(out.data).toHaveLength(0);
+        expect(out.total).toBe(0);
+        expect(out.pages).toBe(0);
+      });
+
+      it.skipIf(skipNoAgg)(
+        'empty result reports pages: 0 (aggregatePaginate offset envelope)',
+        async () => {
+          if (!ctx.repo.aggregatePaginate) return;
+          type Row = { category: string; n: number };
+          // Bind through a non-optional alias — same reason as the
+          // keyset cases above: the contract types the method as
+          // optional, which loses the union return when read inline.
+          const aggregatePaginate = ctx.repo.aggregatePaginate.bind(ctx.repo) as NonNullable<
+            typeof ctx.repo.aggregatePaginate
+          >;
+          const result = await aggregatePaginate<Row>({
+            filter: eq('category', '__no_such_category__'),
+            groupBy: 'category',
+            measures: { n: { op: 'count' } },
+            page: 1,
+            limit: 10,
+          });
+          expect(result.method).toBe('offset');
+          if (result.method !== 'offset') throw new Error('expected offset envelope');
+          expect(result.data).toHaveLength(0);
+          expect(result.total).toBe(0);
+          expect(result.pages).toBe(0);
+        },
+      );
     });
 
     // ──────────────────────────────────────────────────────────────────

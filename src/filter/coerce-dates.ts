@@ -119,7 +119,9 @@ export function coerceFilterDates(
 
   for (const [key, value] of Object.entries(filter)) {
     if (LOGICAL_ARRAY_OPS.has(key) && Array.isArray(value)) {
-      out[key] = value.map((entry) => (isPlainObject(entry) ? coerceFilterDates(entry, options) : entry));
+      out[key] = value.map((entry) =>
+        isPlainObject(entry) ? coerceFilterDates(entry, options) : entry,
+      );
       continue;
     }
 
