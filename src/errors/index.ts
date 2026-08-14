@@ -7,6 +7,13 @@
  * kits ship their own driver-specific classifiers.
  */
 
+export {
+  conservativeMongoIsTransientConflict,
+  type IsTransientConflictFn,
+  isVersionConflictError,
+  neverTransient,
+  VersionConflictError,
+} from './conflict.js';
 export { statusToErrorCode, toErrorContract } from './contract.js';
 export { createError, isHttpError } from './create-error.js';
 export {

@@ -104,11 +104,53 @@ export interface RepoCapabilities {
   /** `withTransaction(fn)` — D1 throws, standalone Mongo throws 263. */
   transactions: boolean;
   /**
+   * `WriteOptions.ifVersion` CAS honored (stale version → thrown
+   * `VersionConflictError`, success increments the version). Kits without
+   * it throw on the option — see the `ifVersion` contract.
+   */
+  optimisticConcurrency?: boolean;
+  /**
    * True if calling `withTransaction` inside another `withTransaction`
-   * callback is expected to work. Mongo's driver supports it via the
-   * same session; SQL drivers typically reject it.
+   * callback is expected to work — as observed on THIS repository, not on
+   * the underlying driver. A kit whose tx-bound repo throws on nested
+   * `withTransaction` declares `false` even when its driver would allow
+   * nesting on the raw session: the capability describes what a caller
+   * holding this object may do. Conformance asserts the two agree.
    */
   nestedTransactions: boolean;
+  /**
+   * WHO owns retry of a transaction aborted by a transient conflict.
+   *
+   * - `'managed'` — `withTransaction` retries internally (MongoDB's
+   *   convenient transaction API re-runs the callback on
+   *   `TransientTransactionError` / `UnknownTransactionCommitResult` for up
+   *   to 120s). The caller MUST invoke it exactly once.
+   * - `'caller'` — one attempt per call; an outer envelope
+   *   (`retryingTransaction`) owns the loop. Manual BEGIN/COMMIT kits.
+   *
+   * **Absent means `'managed'`** — i.e. `retryingTransaction` does not add a
+   * retry layer. Wrapping a self-retrying transaction multiplies the retry
+   * budget (5 outer attempts × a 120s inner window) and makes the callback's
+   * execution count unpredictable, which is the strictly worse failure: a
+   * missing retry surfaces a conflict as a 409, a nested one re-runs side
+   * effects an unbounded number of times. Same posture as
+   * {@link neverTransient} — silence means "don't".
+   *
+   * A kit exposing `withTransaction` MUST declare this (conformance checks).
+   */
+  transactionRetry?: 'managed' | 'caller';
+  /**
+   * This repository refuses writes — another component owns them and
+   * enforces invariants the table cannot express (Better Auth's identity
+   * collections, a SQL view, a read replica). Write methods throw
+   * `ReadOnlyRepositoryError`; hosts should refuse write ROUTES at boot
+   * rather than surfacing the wall on the first request.
+   *
+   * Absent means writable, so nothing changes for ordinary repositories.
+   * Set it via {@link asReadOnlyRepo} rather than by hand — the flag alone
+   * is a label, and a label is not a control.
+   */
+  readOnly?: boolean;
   /** `findOneAndUpdate` with upsert: true. */
   upsert: boolean;
   /** `isDuplicateKeyError(err)` classifier. */

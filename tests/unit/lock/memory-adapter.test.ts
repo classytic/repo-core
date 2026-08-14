@@ -87,3 +87,41 @@ describe('createMemoryLockAdapter', () => {
     expect(lock.tryAcquire('cron.outbox', 'replica-B', 0)).toBe(true);
   });
 });
+
+describe('fencing tokens (tryAcquireFenced)', () => {
+  it('mints a MONOTONIC token per ownership change; extension keeps it', async () => {
+    const { createMemoryLockAdapter } = await import('../../../src/lock/index.js');
+    const lock = createMemoryLockAdapter({ defaultLeaseMs: 50 });
+
+    const a1 = await lock.tryAcquireFenced?.('job', 'holder-A', 1_000);
+    expect(a1?.token).toBe(1);
+    // Extension by the SAME holder: the fence marks ownership epochs, not heartbeats.
+    const a2 = await lock.tryAcquireFenced?.('job', 'holder-A', 1_000);
+    expect(a2?.token).toBe(1);
+    // Contender while held → not acquired.
+    expect(await lock.tryAcquireFenced?.('job', 'holder-B', 1_000)).toBeNull();
+
+    await lock.release('job', 'holder-A');
+    // NEW holder → strictly greater token, even after release (not reset).
+    const b1 = await lock.tryAcquireFenced?.('job', 'holder-B', 1_000);
+    expect(b1?.token).toBe(2);
+  });
+
+  it('expired-lease takeover mints a HIGHER token — the stale holder is fenceable', async () => {
+    const { createMemoryLockAdapter } = await import('../../../src/lock/index.js');
+    const lock = createMemoryLockAdapter();
+    const a = await lock.tryAcquireFenced?.('relay', 'old', 1); // 1ms lease
+    await new Promise((r) => setTimeout(r, 10));
+    const b = await lock.tryAcquireFenced?.('relay', 'new', 1_000);
+    expect(b?.token).toBeGreaterThan(a?.token ?? Infinity * -1);
+    // A downstream store comparing tokens now REJECTS 'old' — the overlap
+    // serialized renewal narrows but cannot close.
+  });
+
+  it('boolean tryAcquire still works — the fenced path is additive', async () => {
+    const { createMemoryLockAdapter } = await import('../../../src/lock/index.js');
+    const lock = createMemoryLockAdapter();
+    expect(await lock.tryAcquire('x', 'h', 1_000)).toBe(true);
+    expect(await lock.tryAcquire('x', 'other', 1_000)).toBe(false);
+  });
+});

@@ -13,8 +13,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isVersionConflictError } from '../errors/index.js';
 import { and, eq, gt, in_, isNull, like, ne, or } from '../filter/index.js';
 import type { OffsetPaginationResult } from '../pagination/types.js';
+import type { RepoCapabilities } from '../repository/capabilities.js';
 import type { KeysetAggPaginationResult } from '../repository/types.js';
 import type { ConformanceContext, ConformanceDoc, ConformanceHarness } from './types.js';
 
@@ -1282,6 +1284,20 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
         expect(rows).toHaveLength(0);
       });
 
+      it('the callback receives a TransactionHandle — the outbox join point', async () => {
+        // `uow.session` is how work OUTSIDE the repository joins the same
+        // transaction (outbox rows, most importantly). Driver-session kits
+        // populate it; connection-bound kits pass an empty handle — but the
+        // ARGUMENT itself is contract: omitting it strands transactional
+        // outbox writes with no way to enlist.
+        let handle: unknown = 'never-called';
+        await ctx.repo.withTransaction!(async (_txRepo, uow) => {
+          handle = uow;
+        });
+        expect(typeof handle).toBe('object');
+        expect(handle).not.toBeNull();
+      });
+
       it('reads inside the txRepo see writes inside the same callback', async () => {
         await ctx.repo.withTransaction!(async (txRepo) => {
           const created = await txRepo.create(
@@ -1291,6 +1307,103 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
           const back = await txRepo.getById(id);
           expect(back?.name).toBe('tx-read');
         });
+      });
+
+      // ────────────────────────────────────────────────────────────────
+      // Declared capability vs OBSERVED behaviour.
+      //
+      // A capability descriptor is a promise made to callers who cannot
+      // see the implementation. Two of them are cheap to verify here and
+      // were each wrong in a shipped kit: `nestedTransactions: true` on a
+      // tx-bound repo that throws on nesting, and an undeclared
+      // `transactionRetry` under an envelope that then added a second
+      // retry policy on top of a self-retrying driver.
+      // ────────────────────────────────────────────────────────────────
+
+      it('declares WHO retries a transient conflict — undeclared ownership stacks retry policies', () => {
+        const caps = (ctx.repo as { capabilities?: RepoCapabilities }).capabilities;
+        expect(
+          caps?.transactionRetry,
+          'a repository exposing withTransaction must declare capabilities.transactionRetry: ' +
+            "'managed' (the kit retries internally, callers invoke it once) or 'caller' " +
+            '(single attempt, an outer envelope owns the loop)',
+        ).toMatch(/^(managed|caller)$/);
+      });
+
+      it('nestedTransactions matches what a nested call ACTUALLY does', async () => {
+        const caps = (ctx.repo as { capabilities?: RepoCapabilities }).capabilities;
+        let nestedWorked: boolean;
+        try {
+          await ctx.repo.withTransaction!(async (txRepo) => {
+            await (
+              txRepo as { withTransaction?: (fn: () => Promise<void>) => Promise<void> }
+            ).withTransaction?.(async () => {});
+          });
+          nestedWorked = true;
+        } catch {
+          nestedWorked = false;
+        }
+        expect(
+          nestedWorked,
+          `capabilities.nestedTransactions is ${String(caps?.nestedTransactions)} but a nested ` +
+            `withTransaction ${nestedWorked ? 'succeeded' : 'threw'} — the descriptor must ` +
+            'describe THIS repository, not the underlying driver',
+        ).toBe(caps?.nestedTransactions === true);
+      });
+    });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Optimistic concurrency — ifVersion CAS
+    //
+    // The contract's teeth: a stale version THROWS VersionConflictError —
+    // never returns null (null means not-found, and collapsing the two
+    // invites a blind retry that clobbers the concurrent write). Gated on
+    // the capability; kits without it skip, and the ifVersion doc requires
+    // them to throw on the option rather than ignore it.
+    // ──────────────────────────────────────────────────────────────────
+
+    describe.skipIf(!harness.features.optimisticConcurrency)('ifVersion CAS', () => {
+      const versionOf = (doc: unknown): number =>
+        Number((doc as Record<string, unknown>)[harness.versionField ?? 'version']);
+
+      it('a matching version applies the write and increments the version', async () => {
+        const created = await ctx.repo.create(
+          harness.makeDoc({ name: 'cas-ok', email: 'cas@x.com' }),
+        );
+        const id = idOf(created, harness.idField)!;
+        const v0 = versionOf(created);
+        const updated = await ctx.repo.update(id, { name: 'cas-ok-2' } as Partial<TDoc>, {
+          ifVersion: v0,
+        });
+        expect(updated?.name).toBe('cas-ok-2');
+        expect(versionOf(updated)).toBe(v0 + 1);
+      });
+
+      it('a STALE version throws VersionConflictError — never null', async () => {
+        const created = await ctx.repo.create(
+          harness.makeDoc({ name: 'cas-stale', email: 'stale@x.com' }),
+        );
+        const id = idOf(created, harness.idField)!;
+        const v0 = versionOf(created);
+        // Concurrent writer moves the version forward.
+        await ctx.repo.update(id, { name: 'cas-stale-2' } as Partial<TDoc>, { ifVersion: v0 });
+
+        let caught: unknown;
+        try {
+          await ctx.repo.update(id, { name: 'cas-stale-3' } as Partial<TDoc>, { ifVersion: v0 });
+        } catch (e) {
+          caught = e;
+        }
+        expect(isVersionConflictError(caught)).toBe(true);
+        // The losing write must not have applied.
+        const current = await ctx.repo.getById(id);
+        expect(current?.name).toBe('cas-stale-2');
+      });
+
+      it('not-found stays null — a missing record is NOT a version conflict', async () => {
+        const ghost = harness.missingId ?? '000000000000000000000000';
+        const out = await ctx.repo.update(ghost, { name: 'x' } as Partial<TDoc>, { ifVersion: 1 });
+        expect(out).toBeNull();
       });
     });
 
