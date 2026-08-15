@@ -173,6 +173,22 @@ export interface CleanupStep {
    */
   readonly destructive: boolean;
   /**
+   * What this step IS, declared once — not merely what one estimate counted.
+   *
+   * Needed at the STEP because a caller has to know a step is protective
+   * WITHOUT running it. A host resolving an operator's exclusion list must
+   * refuse to switch a guard off, and asking `estimate()` to find out would mean
+   * running the counting queries for a line that is being taken out — and
+   * surfacing that line's blockers, so excluding a domain could still be refused
+   * because of it.
+   *
+   * `destructive: false` is not the same question: it is true of a guard AND of
+   * a projection rebuild, and a rebuild is perfectly reasonable to exclude.
+   *
+   * An estimate may restate it; absent everywhere ⇒ `'remove'`.
+   */
+  readonly disposition?: CleanupStepDisposition | undefined;
+  /**
    * Projection / scaffolding rebuilds this step performs AFTER its cleanup —
    * surfaced in the preview's `rebuildActions` (e.g. `'rebuild sales rollup'`).
    */
