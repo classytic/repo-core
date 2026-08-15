@@ -89,10 +89,28 @@ export interface CleanupStepExecuteContext extends CleanupStepContext {
  * One preview line — maps 1:1 onto a host plan item. A business record class
  * (`'sales facts'`, `'journal entries'`), never a collection name.
  */
+/**
+ * What a step's `estimated` COUNTS. Absent ⇒ `'remove'`.
+ *
+ * `destructive: false` is NOT a substitute: it is true of both a protective
+ * guard (counts records it defends) and a projection rebuild (counts records it
+ * recomputes), and those mean opposite things in a "records to remove" headline.
+ * A guard reporting 173 protected journal entries once pushed that headline to
+ * 540 on a plan that removed 367 — a plausible, internally consistent, wrong
+ * number shown at the exact moment an operator authorises destruction.
+ */
+export type CleanupStepDisposition = "remove" | "protect" | "rebuild";
+
 export interface CleanupStepEstimate {
   readonly resource: string;
   /** Estimated records this step would affect. */
   readonly estimated: number;
+  /**
+   * Whether `estimated` counts records REMOVED, PROTECTED, or REBUILT.
+   * Defaults to `'remove'`, so every existing purge step is unchanged and only
+   * a step that means something else has to say so.
+   */
+  readonly disposition?: CleanupStepDisposition | undefined;
   /** What this step RETAINS (e.g. `'measures kept, PII redacted'`). */
   readonly retained?: string | undefined;
   /**
