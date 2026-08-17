@@ -147,3 +147,52 @@ export function resolveTenantField(config?: TenantConfig | boolean): string | fa
   if (!resolved.enabled || resolved.strategy === 'none') return false;
   return resolved.tenantField;
 }
+
+/**
+ * Refuse a config that still carries a pre-consolidation tenant key.
+ *
+ * ## Why this belongs in repo-core and not in each kernel
+ *
+ * Kernels are migrating from a per-package tenant shape (`multiTenant`, plus a
+ * sibling `tenantFieldType` in some) onto {@link TenantConfig} under the key
+ * `tenant`. `@classytic/ledger` has landed; catalog, order, cart, crm, flow,
+ * party, review, transfer and yard have adopted the TYPE but still read
+ * `multiTenant`. Each of those is a future rename.
+ *
+ * The rename itself is trivial. What is not trivial is the failure mode when a
+ * CALLER misses it, because every one of these resolvers reads
+ * `resolveTenantConfig(config.tenant ?? false)`: an absent `tenant` resolves to
+ * `strategy: 'none'` — no tenant field, no tenant filter, every read spanning
+ * ALL tenants, no error, and figures that look plausible. A host that asked for
+ * tenancy gets none, silently.
+ *
+ * Nine packages each remembering to hand-roll that check is nine chances to
+ * forget, and the one that forgets is the one that ships the leak. So the guard
+ * lives beside the resolver every one of them already calls.
+ *
+ * Additive and non-breaking: nothing calls it until a package renames.
+ *
+ * @param config the raw, unresolved shape as the host supplied it
+ * @param pkg package name for the message (e.g. `'defineOrder'`)
+ * @param extra additional legacy keys this package is retiring, as
+ *   `[oldKey, newPath]` — pass `['tenantFieldType', 'tenant.fieldType']` when
+ *   the package carried a sibling field-type option.
+ */
+export function assertNoLegacyTenantKeys(
+  config: unknown,
+  pkg: string,
+  extra: ReadonlyArray<readonly [string, string]> = [],
+): void {
+  if (config === null || typeof config !== 'object') return;
+  const record = config as Record<string, unknown>;
+  const retired: ReadonlyArray<readonly [string, string]> = [['multiTenant', 'tenant'], ...extra];
+  for (const [key, became] of retired) {
+    if (record[key] === undefined) continue;
+    throw new Error(
+      `${pkg}: \`${key}\` was renamed to \`${became}\`. It is REFUSED rather than ignored ` +
+        'because ignoring it disables tenancy SILENTLY — no tenant field, no tenant filter, ' +
+        'and every read spanning all tenants while returning plausible numbers. ' +
+        `Move the value to \`tenant\` (\`tenant: false\` for a single-tenant deployment).`,
+    );
+  }
+}
