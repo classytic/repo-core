@@ -128,6 +128,17 @@ export interface ConformanceHarness<TDoc extends ConformanceDoc = ConformanceDoc
   idField: string;
   /** Feature support flags — skipped scenarios show as `skipped` in vitest output. */
   features: ConformanceFeatures;
+  /**
+   * Field carrying the optimistic-concurrency version, when the
+   * `optimisticConcurrency` capability is declared. Default `'version'`.
+   */
+  versionField?: string;
+  /**
+   * A syntactically valid id that matches no record — the ifVersion cases
+   * assert not-found stays `null` (never a version conflict). Default is a
+   * Mongo-shaped all-zero ObjectId; SQL/string-id kits supply their own.
+   */
+  missingId?: string;
   /** Create a fresh, isolated repo + cleanup closure. Called per test. */
   setup(): Promise<ConformanceContext<TDoc>>;
   /**

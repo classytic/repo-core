@@ -15,6 +15,7 @@ export default defineConfig({
     'query-parser/index': 'src/query-parser/index.ts',
     'context/index': 'src/context/index.ts',
     'cache/index': 'src/cache/index.ts',
+    'hash/index': 'src/hash/index.ts',
     'events/index': 'src/events/index.ts',
     'schema/index': 'src/schema/index.ts',
     'testing/index': 'src/testing/index.ts',
@@ -50,6 +51,23 @@ export default defineConfig({
   // exports: false — hand-maintain package.json "exports". Auto-generation
   // collapses to a `"."` root entry when there's a single subpath, which
   // violates the no-root-barrel rule. See INFRA.md §4.
+  deps: {
+    // repo-core is the base every kit layers over, so it must never vendor a sibling —
+    // two copies of a `@classytic/*` kernel in one process is a correctness bug (an
+    // engine, registry or outbox relay silently gets a second instance), not a size
+    // regression, and the build that does it still prints `✔ Build complete`.
+    //
+    // REGEX, never bare strings: a string in `neverBundle` matches only the EXACT
+    // specifier, not subpaths — falsified in ../mongokit/tsdown.config.ts, where
+    // `['@classytic/repo-core']` inlined `@classytic/repo-core/filter` wholesale while
+    // the glob form `@classytic/repo-core/**` did not help either.
+    //
+    // `@spinekit/` is listed even though repo-core must never import the spine: a gate
+    // that would not fire is cheap, and a gate that stops matching after a scope rename
+    // reports success while protecting nothing (commerce/AGENTS.md §"eight things that
+    // are NOT a source grep").
+    neverBundle: [/^@classytic\//, /^@spinekit\//],
+  },
   publint: 'ci-only',
   attw: 'ci-only',
 });

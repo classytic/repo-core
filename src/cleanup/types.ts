@@ -89,10 +89,28 @@ export interface CleanupStepExecuteContext extends CleanupStepContext {
  * One preview line — maps 1:1 onto a host plan item. A business record class
  * (`'sales facts'`, `'journal entries'`), never a collection name.
  */
+/**
+ * What a step's `estimated` COUNTS. Absent ⇒ `'remove'`.
+ *
+ * `destructive: false` is NOT a substitute: it is true of both a protective
+ * guard (counts records it defends) and a projection rebuild (counts records it
+ * recomputes), and those mean opposite things in a "records to remove" headline.
+ * A guard reporting 173 protected journal entries once pushed that headline to
+ * 540 on a plan that removed 367 — a plausible, internally consistent, wrong
+ * number shown at the exact moment an operator authorises destruction.
+ */
+export type CleanupStepDisposition = "remove" | "protect" | "rebuild";
+
 export interface CleanupStepEstimate {
   readonly resource: string;
   /** Estimated records this step would affect. */
   readonly estimated: number;
+  /**
+   * Whether `estimated` counts records REMOVED, PROTECTED, or REBUILT.
+   * Defaults to `'remove'`, so every existing purge step is unchanged and only
+   * a step that means something else has to say so.
+   */
+  readonly disposition?: CleanupStepDisposition | undefined;
   /** What this step RETAINS (e.g. `'measures kept, PII redacted'`). */
   readonly retained?: string | undefined;
   /**
@@ -154,6 +172,22 @@ export interface CleanupStep {
    * recipe is destructive iff ANY of its steps is.
    */
   readonly destructive: boolean;
+  /**
+   * What this step IS, declared once — not merely what one estimate counted.
+   *
+   * Needed at the STEP because a caller has to know a step is protective
+   * WITHOUT running it. A host resolving an operator's exclusion list must
+   * refuse to switch a guard off, and asking `estimate()` to find out would mean
+   * running the counting queries for a line that is being taken out — and
+   * surfacing that line's blockers, so excluding a domain could still be refused
+   * because of it.
+   *
+   * `destructive: false` is not the same question: it is true of a guard AND of
+   * a projection rebuild, and a rebuild is perfectly reasonable to exclude.
+   *
+   * An estimate may restate it; absent everywhere ⇒ `'remove'`.
+   */
+  readonly disposition?: CleanupStepDisposition | undefined;
   /**
    * Projection / scaffolding rebuilds this step performs AFTER its cleanup —
    * surfaced in the preview's `rebuildActions` (e.g. `'rebuild sales rollup'`).

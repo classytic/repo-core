@@ -5,14 +5,50 @@
  * Ships in repo-core because tests + single-process apps shouldn't each
  * reinvent the TTL + glob-invalidation logic, and the implementation is
  * genuinely driver-free.
+ *
+ * Bounded by default (`maxEntries`, LRU). A TTL alone does not bound a
+ * cache — entries expire only when read, so a high-cardinality keyspace
+ * grows until the process dies. Eviction is always safe for a cache, so
+ * the bound is the default rather than an opt-in.
  */
 
 import type { CacheAdapter } from './types.js';
 
-/** Minimal in-memory `Map`-backed adapter with per-key TTL + prefix invalidation. */
-export function createMemoryCacheAdapter(): CacheAdapter {
+export interface MemoryCacheAdapterOptions {
+  /**
+   * Hard entry ceiling; the least-recently-used entry is evicted past it.
+   * Default 10,000.
+   *
+   * A TTL alone does not bound a cache. Entries only expire when someone reads
+   * them, and a workload with high key cardinality (per-tenant keys, per-commit
+   * keys, per-filter query keys) mints faster than it re-reads, so the map grows
+   * monotonically until the process dies. Eviction is always semantically safe
+   * for a cache — a miss is a correct answer — so this is on by default rather
+   * than opt-in.
+   *
+   * Set `0` for the previous unbounded behaviour. Only do that if something else
+   * in your process bounds the keyspace.
+   */
+  maxEntries?: number;
+}
+
+/** Minimal in-memory `Map`-backed adapter with per-key TTL, LRU eviction and
+ *  prefix invalidation. */
+export function createMemoryCacheAdapter(options: MemoryCacheAdapterOptions = {}): CacheAdapter {
+  const maxEntries = options.maxEntries ?? 10_000;
   const store = new Map<string, { value: unknown; expiresAt: number }>();
   const now = () => Date.now();
+
+  /** Map iteration order is insertion order, so re-inserting on read makes the
+   *  first key the least-recently-used one. */
+  function evictIfNeeded(): void {
+    if (maxEntries <= 0) return;
+    while (store.size > maxEntries) {
+      const oldest = store.keys().next().value;
+      if (oldest === undefined) return;
+      store.delete(oldest);
+    }
+  }
 
   function readUnexpired(key: string): { value: unknown; expiresAt: number } | undefined {
     const entry = store.get(key);
@@ -21,6 +57,8 @@ export function createMemoryCacheAdapter(): CacheAdapter {
       store.delete(key);
       return undefined;
     }
+    store.delete(key); // promote to most-recently-used
+    store.set(key, entry);
     return entry;
   }
 
@@ -36,7 +74,9 @@ export function createMemoryCacheAdapter(): CacheAdapter {
     },
     set(key: string, value: unknown, ttlSeconds = 60): void {
       const expiresAt = ttlSeconds === 0 ? 0 : now() + ttlSeconds * 1000;
+      store.delete(key);
       store.set(key, { value, expiresAt });
+      evictIfNeeded();
     },
     delete(key: string): void {
       store.delete(key);
@@ -72,6 +112,7 @@ export function createMemoryCacheAdapter(): CacheAdapter {
         // overwrite as a more forgiving behavior).
         const expiresAt = existing?.expiresAt ?? (ttlSeconds === 0 ? 0 : now() + ttlSeconds * 1000);
         store.set(key, { value: set, expiresAt });
+        evictIfNeeded();
       }
       let added = 0;
       for (const m of members) {
@@ -103,6 +144,7 @@ export function createMemoryCacheAdapter(): CacheAdapter {
           ? 0
           : now() + ttlSeconds * 1000;
       store.set(key, { value: next, expiresAt });
+      evictIfNeeded();
       return next;
     },
   };

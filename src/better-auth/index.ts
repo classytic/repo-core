@@ -97,6 +97,19 @@ export interface ResolveBetterAuthCollectionsOptions {
   plugins?: BetterAuthPluginKey[];
 
   /**
+   * CANONICAL collection names to omit from the result.
+   *
+   * The reason this exists: a host commonly needs stub models for the BA collections it merely
+   * REFERENCES and a full `createBetterAuthOverlay` for the one it exposes CRUD on. Registering both
+   * for the same collection collides — mongoose locks a schema on first `model()`, so the overlay's
+   * `additionalFields` would be silently dropped, and the overlay therefore refuses.
+   *
+   * Applied BEFORE `modelOverrides` / `usePlural`, so a caller names the canonical collection and
+   * never has to predict the final model name.
+   */
+  exclude?: string[];
+
+  /**
    * Additional collection names beyond the built-in plugin set.
    *
    * Use for plugins that ship as separate `@better-auth/*` packages — their
@@ -136,7 +149,14 @@ export interface ResolveBetterAuthCollectionsOptions {
 export function resolveBetterAuthCollections(
   options: ResolveBetterAuthCollectionsOptions = {},
 ): string[] {
-  const { plugins = [], extraCollections = [], usePlural = false, modelOverrides = {} } = options;
+  const {
+    plugins = [],
+    extraCollections = [],
+    usePlural = false,
+    modelOverrides = {},
+    exclude = [],
+  } = options;
+  const excluded = new Set(exclude);
 
   // 'core' is always implied — adding it explicitly to the set keeps the
   // dedupe step trivial and lets callers omit it from their plugin list.
@@ -158,6 +178,12 @@ export function resolveBetterAuthCollections(
   for (const canonical of collected) {
     if (seen.has(canonical)) continue;
     seen.add(canonical);
+    /**
+     * Excluded HERE, while the CANONICAL name is still in hand — before `modelOverrides` /
+     * `usePlural` produce the final name. A caller excluding `'user'` should not have to predict
+     * whether that becomes `users` or something a `modelName` override renamed it to.
+     */
+    if (excluded.has(canonical)) continue;
     const overridden = modelOverrides[canonical];
     const finalName =
       overridden ?? (usePlural ? pluralizeBetterAuthCollection(canonical) : canonical);

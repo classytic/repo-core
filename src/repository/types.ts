@@ -51,6 +51,21 @@ export type FilterInput = Filter | Record<string, unknown>;
  */
 export type RepositorySession = unknown;
 
+/**
+ * What a transaction callback receives BESIDE the tx-bound repository.
+ *
+ * `session` is the raw driver handle, exposed so work that lives OUTSIDE the
+ * repository can join the same transaction — the canonical consumer is an
+ * outbox writer: `outbox.store(event, { session: uow.session })` commits the
+ * event row atomically with the business write. Present when the driver has a
+ * per-transaction handle (Mongo's ClientSession); connection-bound backends
+ * (SQLite) pass an empty handle — their tx-bound repo IS the only join point.
+ * Kits MUST pass a handle object (possibly empty), never omit the argument.
+ */
+export interface TransactionHandle {
+  session?: RepositorySession;
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Option bags
 // ──────────────────────────────────────────────────────────────────────
@@ -105,6 +120,17 @@ export interface QueryOptions {
 export interface WriteOptions extends QueryOptions {
   /** Upsert on update/replace. */
   upsert?: boolean;
+  /**
+   * Optimistic-concurrency CAS. When set, the write applies ONLY if the
+   * stored version equals `ifVersion`; on mismatch the kit MUST throw
+   * `VersionConflictError` (`@classytic/repo-core/errors`) — never return
+   * `null`, which means not-found and would invite a blind retry that
+   * clobbers the concurrent write. A successful versioned write increments
+   * the stored version. Requires the `optimisticConcurrency` capability;
+   * kits without it MUST throw on the option rather than ignore it (a
+   * silently dropped guard is the defect, not a degraded mode).
+   */
+  ifVersion?: number;
 }
 
 /**
@@ -962,6 +988,23 @@ export interface AggDateBucket {
   field: string;
   /** Bucket granularity. */
   interval: AggDateBucketInterval;
+  /**
+   * IANA zone the bucket boundaries are drawn in. Absent means UTC.
+   *
+   * A UTC day is not a BUSINESS day. In a UTC+6 deployment every row from
+   * 18:00 to midnight local falls in the PREVIOUS UTC day, and at month-end in
+   * the previous month — so a daily or monthly rollup silently reports the
+   * wrong period. Nothing throws; the chart simply draws the wrong day. The
+   * absence of this field is why every business-day rollup had to abandon the
+   * portable IR and hand-roll a kit-native pipeline, and hand-rolling made the
+   * zone optional again.
+   *
+   * REQUIRES the `dateBucketTimezone` capability. A kit that cannot draw
+   * DST-correct boundaries (SQLite has no tz database) MUST THROW when this is
+   * set — never fall back to UTC. Falling back returns a plausible number for
+   * the wrong period, which is the failure this field exists to prevent.
+   */
+  timezone?: string;
 }
 
 /**
@@ -1590,6 +1633,16 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    */
   isDuplicateKeyError?(err: unknown): boolean;
 
+  /**
+   * Classify an error from a transactional write as a TRANSIENT concurrency
+   * conflict — one the backend expects callers to recover from by re-running
+   * the same work (Mongo `TransientTransactionError` label, PG 40001/40P01,
+   * `SQLITE_BUSY`, Prisma P2034). Consumed by `retryingTransaction`; same
+   * ownership rule as `isDuplicateKeyError` — the kit knows its driver.
+   * Absent = nothing retries (`neverTransient`), the safe default.
+   */
+  isTransientConflictError?(err: unknown): boolean;
+
   // ── Compound read ────────────────────────────────────────────────────
   /** Find a single doc by compound filter (used by arc's AccessControl). */
   getOne?(filter: FilterInput, options?: QueryOptions): Promise<TDoc | null>;
@@ -1947,7 +2000,7 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    * ```
    */
   withTransaction?<T>(
-    fn: (txRepo: StandardRepo<TDoc>) => Promise<T>,
+    fn: (txRepo: StandardRepo<TDoc>, uow?: TransactionHandle) => Promise<T>,
     options?: Record<string, unknown>,
   ): Promise<T>;
 

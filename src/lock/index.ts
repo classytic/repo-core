@@ -71,6 +71,26 @@ export interface LockAdapter {
   tryAcquire(name: string, holderId: string, leaseMs: number): Promise<boolean> | boolean;
 
   /**
+   * Optional FENCED acquire — same atomic semantics as `tryAcquire`, but a
+   * successful (or extended) acquisition returns a MONOTONIC token minted by
+   * the STORE. A process cannot fence itself: only the CAS authority can
+   * guarantee that a later holder's token is strictly greater, which is what
+   * lets downstream stores reject a stale ex-holder's writes after lease
+   * loss — the overlap that serialized renewal narrows but cannot close.
+   *
+   * Contract: token increases on every CHANGE of holder (extension by the
+   * same holder keeps its token); `null` = not acquired. Adapters that
+   * cannot mint monotonic tokens (pure-memory across restarts) omit this
+   * method — callers feature-detect, and the delivery-guarantees matrix
+   * documents which stores fence.
+   */
+  tryAcquireFenced?(
+    name: string,
+    holderId: string,
+    leaseMs: number,
+  ): Promise<{ token: number } | null> | { token: number } | null;
+
+  /**
    * Release the lock if held by `holderId`. Returns `true` on actual
    * release, `false` when the lock isn't held by this holder. Safe
    * to call without ever having acquired (returns `false`).
@@ -98,6 +118,8 @@ export interface LockState {
   expiresAt: Date;
   /** When the current holder first acquired (or last extended) the lock. */
   acquiredAt: Date;
+  /** Fencing token of the current holder, when the adapter fences. */
+  token?: number;
 }
 
 /** Adapter-construction options that every backend shares. */
@@ -130,7 +152,15 @@ export interface BaseLockAdapterOptions {
  */
 export function createMemoryLockAdapter(options: BaseLockAdapterOptions = {}): LockAdapter {
   const { defaultLeaseMs = 30_000 } = options;
-  const store = new Map<string, { holder: string; expiresAt: number; acquiredAt: number }>();
+  const store = new Map<
+    string,
+    { holder: string; expiresAt: number; acquiredAt: number; token: number }
+  >();
+  // Fencing counters survive lock expiry — monotonicity is PER NAME for the
+  // adapter's lifetime, which is the strongest a memory store can honestly
+  // offer (a process restart resets it, which is why the contract lets
+  // callers feature-detect and the matrix documents the limit).
+  const fenceSeq = new Map<string, number>();
 
   function readLive(name: string, now: number) {
     const entry = store.get(name);
@@ -144,10 +174,19 @@ export function createMemoryLockAdapter(options: BaseLockAdapterOptions = {}): L
 
   return {
     tryAcquire(name, holderId, leaseMs) {
+      return this.tryAcquireFenced?.(name, holderId, leaseMs) !== null;
+    },
+
+    tryAcquireFenced(name, holderId, leaseMs) {
       const ms = leaseMs > 0 ? leaseMs : defaultLeaseMs;
       const now = Date.now();
       const live = readLive(name, now);
-      if (live && live.holder !== holderId) return false;
+      if (live && live.holder !== holderId) return null;
+      // Token increments on every CHANGE of holder; an extension by the
+      // same holder keeps its token — the fence marks ownership epochs,
+      // not heartbeats.
+      const token = live ? live.token : (fenceSeq.get(name) ?? 0) + 1;
+      if (!live) fenceSeq.set(name, token);
       store.set(name, {
         holder: holderId,
         expiresAt: now + ms,
@@ -155,8 +194,9 @@ export function createMemoryLockAdapter(options: BaseLockAdapterOptions = {}): L
         // lease. Matches Mongo / SQL adapters which keep the
         // original `acquiredAt` across extensions for diagnostics.
         acquiredAt: live ? live.acquiredAt : now,
+        token,
       });
-      return true;
+      return { token };
     },
 
     release(name, holderId) {

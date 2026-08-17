@@ -58,7 +58,17 @@ export {
   validatePluginOrder,
 } from './plugin-types.js';
 export { type PurgePort, runChunkedPurge, type WritingPurgeStrategy } from './purge.js';
+export {
+  asReadOnlyRepo,
+  isReadOnlyRepo,
+  type ReadOnlyRepoOptions,
+  ReadOnlyRepositoryError,
+} from './read-only.js';
 export { type RetryPolicy, throwIfAborted, withRetry } from './resilience.js';
+export {
+  type RetryingTransactionOptions,
+  retryingTransaction,
+} from './retrying-transaction.js';
 export type {
   AggCacheOptions,
   AggDateBucket,
@@ -96,6 +106,7 @@ export type {
   TenantPurgeProgress,
   TenantPurgeResult,
   TenantPurgeStrategy,
+  TransactionHandle,
   TransitionArgs,
   TransitionMachine,
   UpdateManyResult,

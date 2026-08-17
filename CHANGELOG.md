@@ -4,6 +4,55 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-08-13
+
+### Added — transactional-core contracts (Phase 1a + 1d) + fencing (Phase 2, first slice)
+
+- **Concurrency-conflict taxonomy** (`/errors`): `IsTransientConflictFn` + `neverTransient` default + `conservativeMongoIsTransientConflict` — same ownership rule as `isDuplicateKeyError` (the kit knows its driver; repositories expose `isTransientConflictError`). The default is NO retry: re-running side effects on an unclassified failure is the unsafe direction.
+- **`VersionConflictError`** (`/errors`) + `isVersionConflictError` (survives duplicated copies): the optimistic-CAS violation, 409-shaped, distinct from not-found by contract — a stale version THROWS, never returns `null`, because collapsing the two invites a blind retry that clobbers the concurrent write.
+- **`WriteOptions.ifVersion`** + `RepoCapabilities.optimisticConcurrency`: CAS write contract — apply only at the expected version, increment on success, throw on the option when the capability is absent (a silently dropped guard is the defect, not a degraded mode).
+- **`retryingTransaction(repo, fn, opts)`** (`/repository`): the transactional retry envelope — `withTransaction` re-run on TRANSIENT conflicts only, bounded attempts, full-jitter backoff, abort-aware, classification from the kit predicate. Refuses (throws) a repository without `withTransaction` — no silent degrade. Contains no backoff math of its own: rides `withRetry`.
+- **`withRetry` gains `maxDelayMs` + `jitter` + an abortable sleep** — an aborted caller no longer waits out its backoff (mutation-proven: a plain `setTimeout` there times the pinning test out). Defaults unchanged.
+- **`TransactionHandle`**: `withTransaction`'s callback gains a second argument `{ session? }` — the raw driver handle, so work OUTSIDE the repository (the outbox writer, canonically) can join the same transaction. Kits MUST pass a handle object (possibly empty, for connection-bound backends); a conformance case pins the argument's presence. `retryingTransaction` forwards it structurally.
+- **`LockAdapter.tryAcquireFenced?`** (additive): a successful acquire returns a MONOTONIC token minted by the STORE — a process cannot fence itself. Token increments per ownership CHANGE (extension keeps it; epochs, not heartbeats), so a downstream store can reject a stale ex-holder after lease loss — the overlap serialized renewal narrows but cannot close. `LockState.token`; memory adapter implements it (monotonic for the adapter lifetime — the honest memory limit, documented). Boolean `tryAcquire` unchanged.
+- **`RepoCapabilities.transactionRetry: 'managed' | 'caller'`** — WHO owns retry of a conflict-aborted transaction. `retryingTransaction` used to wrap EVERY kit in its own 5-attempt loop, including MongoDB's convenient transaction API, which already re-runs the callback internally on `TransientTransactionError` / `UnknownTransactionCommitResult` for up to 120s. Two stacked policies: the callback's execution count stopped being bounded by `maxAttempts`, `onRetry` reported a fraction of real attempts, every outer attempt opened a NEW session, and misplaced side effects repeated unpredictably. Retry ownership is now DECLARED — `'managed'` is invoked exactly once, `'caller'` gets the envelope's loop. **Absent means `'managed'`**: a missing retry surfaces a conflict as a 409, a nested one re-runs side effects without bound, so silence must mean "don't" (same posture as `neverTransient`). `retryOwner` overrides for repositories that cannot declare.
+- **`retryingTransaction` is capability-aware** — a repository that publishes a descriptor is held to it (`transactions !== true` → throw, which `'unknown'` reports, failing closed). Method presence was never the test: kits expose `withTransaction` unconditionally and fail at BEGIN.
+- **`asReadOnlyRepo(repo, { reason })` + `RepoCapabilities.readOnly`** (`/repository`) — seal a repository whose rows another writer owns (Better Auth's identity collections, a SQL view, a read replica). Writes throw `ReadOnlyRepositoryError` (synchronously, so a forgotten `await` still crashes); reads pass through. A Proxy rather than a wrapper so a kit method this module has never heard of is sealed BY DEFAULT instead of leaking. `readOnly` lets a host refuse write ROUTES at boot rather than surfacing the wall on the first request.
+- **`TransactionHandle` is exported from `/repository`** — it was defined in `types.ts` but never re-exported, so consumers restated it structurally as `{ session?: unknown }` and would silently miss any field added to the contract.
+- **Conformance: capability-vs-behaviour assertions** — a transactional repo must declare `transactionRetry`, and `nestedTransactions` must match what a nested `withTransaction` call ACTUALLY does. Both were wrong in a shipped kit: mongokit declared `nestedTransactions: true` while its tx-bound proxy threw on the very same call.
+- **Conformance: `ifVersion CAS` block** (gated on `optimisticConcurrency`): matching version applies + increments, stale version throws `VersionConflictError` and the losing write does not apply, not-found stays `null`. New optional harness fields `versionField` / `missingId`.
+
+## [0.22.0] - 2026-08-12
+
+### Added — `pages: 0` conformance tests for empty results
+
+- `runStandardRepoConformance` now asserts `pages: 0` for empty offset envelopes (both the primary `getAll` path and the `aggregatePaginate` path). The field had no assertion anywhere in the suite; two kit paths diverged silently: the primary offset path computed `ceil(0/limit) = 0` while aggregate and lookup paths used `Math.max(1, ceil(...)) = 1`. The contract is `0` — zero rows fill zero pages — and it is what every kit's primary path already returned. The missing assertion let the drift reach a consumer as golden-fixture breakage when a `lookups` join rerouted a list read onto the divergent path.
+
+## [0.21.0] - 2026-08-10
+
+### Added — LRU-bounded `createMemoryCacheAdapter`
+
+- `createMemoryCacheAdapter(options?)` now accepts `MemoryCacheAdapterOptions` with a `maxEntries` cap (default `10,000`). Past the cap the least-recently-used entry is evicted — read promotion (delete + re-insert) keeps the map ordered by recency so eviction is O(1). A TTL alone does not bound the map: entries only expire when read, so a high-cardinality keyspace (per-tenant, per-commit, per-filter keys) grows monotonically until the process dies. Eviction is always safe for a cache, so the bound is on by default. Set `maxEntries: 0` to restore the previous unbounded behaviour.
+- `MemoryCacheAdapterOptions` exported from `@classytic/repo-core/cache`.
+
+### Added — timezone-aware date buckets (`AggDateBucket.timezone`)
+
+- `AggDateBucket.timezone` — IANA zone the bucket boundaries are drawn in; absent means UTC. A UTC day is not a business day in any non-UTC deployment: rows from 18:00 to midnight local fall in the previous UTC day, silently reporting the wrong period in daily/monthly rollups.
+- `AggregateOpsSupport.dateBucketTimezone` capability flag — a kit that cannot draw DST-correct boundaries (e.g. SQLite, no tz database) MUST declare `dateBucketTimezone: false` and throw when the field is set rather than silently bucketing in UTC. Mongokit (`$dateTrunc` / `$dateToString` both accept `timezone`) declares `true`.
+
+## [0.20.0] - 2026-08-04
+
+### Added
+
+- **`ResolveBetterAuthCollectionsOptions.exclude`** — canonical collection names
+  to omit from `resolveBetterAuthCollections()` output. Applied before
+  `modelOverrides` / `usePlural` so a caller names the canonical collection
+  (`'user'`) and never has to predict the final model name. Solves the collision
+  when a host registers stub models for BA collections it merely references and a
+  full `createBetterAuthOverlay` for the one it exposes CRUD on — both for the
+  same collection would cause mongoose to lock the schema on first `model()`,
+  silently dropping `additionalFields` and causing the overlay to refuse.
+
 ## [0.19.0] - 2026-07-29
 
 ### Added — `coerceFilterDates` + ISO date helpers (`./filter`)

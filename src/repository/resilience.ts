@@ -32,8 +32,43 @@ export interface RetryPolicy {
   maxAttempts?: number;
   /** Base delay (ms) for exponential backoff. Default 100ms; doubles each attempt. */
   baseDelayMs?: number;
-  /** Decide whether a given error is transient. Default: retry every error. */
+  /** Ceiling for a single backoff delay. Default: uncapped. */
+  maxDelayMs?: number;
+  /**
+   * Full jitter: each delay is `random(0, computed)`. Default `false` for
+   * back-compat. Turn it ON for any policy shared by concurrent writers —
+   * synchronized deterministic backoff makes colliding transactions collide
+   * again on every attempt.
+   */
+  jitter?: boolean;
+  /**
+   * Decide whether a given error is transient. Default: retry every error —
+   * kept for back-compat, but UNSAFE as a shared default (it re-runs side
+   * effects on deterministic failures); pass an explicit predicate.
+   * `retryingTransaction` always does.
+   */
   shouldRetry?: (err: unknown, attempt: number) => boolean;
+}
+
+/**
+ * Abortable sleep. A plain `setTimeout` promise holds the process through an
+ * abort — a cancelled request would silently wait out its full backoff before
+ * noticing. Listener is removed on the timer path so repeated retries don't
+ * accumulate listeners on one long-lived signal.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
@@ -64,8 +99,12 @@ export async function withRetry<T>(
       lastErr = err;
       if (attempt === maxAttempts - 1) break;
       if (!shouldRetry(err, attempt + 1)) break;
-      // Exponential backoff: baseDelayMs * 2^attempt (100ms / 200ms / 400ms / …).
-      await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+      // Exponential backoff: baseDelayMs * 2^attempt, capped by maxDelayMs,
+      // optionally full-jittered (random(0, computed)).
+      let delay = baseDelayMs * 2 ** attempt;
+      if (policy.maxDelayMs !== undefined) delay = Math.min(delay, policy.maxDelayMs);
+      if (policy.jitter) delay = Math.random() * delay;
+      await sleep(delay, signal);
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
