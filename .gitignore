@@ -7,3 +7,6 @@ coverage
 .env
 .env.*
 !.env.example
+
+# Vitest JSON reporter artifact — a run leaves this behind; never source.
+.rc.json

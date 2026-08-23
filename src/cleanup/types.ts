@@ -99,7 +99,7 @@ export interface CleanupStepExecuteContext extends CleanupStepContext {
  * 540 on a plan that removed 367 — a plausible, internally consistent, wrong
  * number shown at the exact moment an operator authorises destruction.
  */
-export type CleanupStepDisposition = "remove" | "protect" | "rebuild";
+export type CleanupStepDisposition = 'remove' | 'protect' | 'rebuild';
 
 export interface CleanupStepEstimate {
   readonly resource: string;

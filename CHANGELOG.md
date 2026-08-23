@@ -4,6 +4,20 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-17
+
+Version bump only — republished 0.23.1's contents under a minor so consumers pinning `>=0.24.0` get the tenant guard by a floor rather than a patch. No source changes over 0.23.1.
+
+## [0.23.1] - 2026-08-17
+
+### Added — `assertNoLegacyTenantKeys(config, pkg, extra?)` (`/tenant`)
+
+Refuses a config still carrying a pre-consolidation tenant key (`multiTenant`, plus any package-specific retirees passed via `extra`) instead of ignoring it.
+
+The rename onto `TenantConfig` under `tenant` is trivial; the failure mode when a CALLER misses it is not. Every kernel resolver reads `resolveTenantConfig(config.tenant ?? false)`, so an absent `tenant` resolves to `strategy: 'none'` — no tenant field, no tenant filter, every read spanning ALL tenants, no error, and figures that look plausible. A host that asked for tenancy silently gets none.
+
+The guard lives beside the resolver every one of those packages already calls, rather than being hand-rolled nine times — nine chances to forget, and the one that forgets ships the leak. Additive and non-breaking: nothing calls it until a package renames.
+
 ## [0.23.0] - 2026-08-13
 
 ### Added — transactional-core contracts (Phase 1a + 1d) + fencing (Phase 2, first slice)
