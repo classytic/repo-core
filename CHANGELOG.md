@@ -4,6 +4,14 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-24
+
+### Added
+
+- **`CacheAdapterResolver = () => CacheAdapter | undefined`** — a function consulted per call that returns the store for the current scope, or `undefined` for "no cache right now". `undefined` is inert — identical to `enabled: false` — and never falls back to a shared store, because that fallback is the cross-scope leak the scoping exists to prevent.
+- **`CacheAdapterSource = CacheAdapter | CacheAdapterResolver`** — `CacheEngine` and `cachePlugin` now accept either a fixed process-lifetime adapter (unchanged behaviour) or a resolver. A bare adapter is sugar for `() => adapter`; normalised at construction so every call site is on one path.
+- **`CacheAdapterResolver` and `CacheAdapterSource` exported from `@classytic/repo-core/cache`** and re-exported from the plugin index.
+
 ## [0.24.0] - 2026-08-17
 
 Version bump only — republished 0.23.1's contents under a minor so consumers pinning `>=0.24.0` get the tenant guard by a floor rather than a patch. No source changes over 0.23.1.

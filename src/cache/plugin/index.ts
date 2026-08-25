@@ -38,7 +38,7 @@ import type { RepositoryBase } from '../../repository/base.js';
 import type { Plugin } from '../../repository/plugin-types.js';
 import { CacheEngine } from '../engine.js';
 import type { CacheOptions, CacheReadResult } from '../options.js';
-import type { CacheAdapter } from '../types.js';
+import type { CacheAdapterSource } from '../engine.js';
 import { DEFAULT_SHAPE_KEYS_BY_OP } from './context.js';
 import { registerInvalidationHooks } from './invalidation-hooks.js';
 import { registerReadHooks } from './read-hooks.js';
@@ -90,8 +90,27 @@ export interface LogCallbacks {
 }
 
 export interface RepositoryCachePluginOptions {
-  /** Concrete adapter — Redis, in-memory, custom KV. */
-  readonly adapter: CacheAdapter;
+  /**
+   * Concrete adapter — Redis, in-memory, custom KV — OR a resolver consulted
+   * per call that returns the store for the current scope.
+   *
+   * The resolver form is what makes a cache narrower than the process
+   * possible (per-request, per-job, per-unit-of-work) without this package
+   * knowing what those are. Returning `undefined` means "no cache right now"
+   * and the call behaves exactly as `enabled: false` — it does not fall back
+   * to a shared store, because that fallback IS the cross-scope leak the
+   * scoping exists to prevent.
+   *
+   * @example Process-lifetime (unchanged)
+   * ```ts
+   * cachePlugin({ adapter: createMemoryCacheAdapter() })
+   * ```
+   * @example Request-scoped — dies with the request, no TTL needed
+   * ```ts
+   * cachePlugin({ adapter: () => requestScopedCache() })
+   * ```
+   */
+  readonly adapter: CacheAdapterSource;
   /** Read ops the plugin caches. Default: every op in `DEFAULT_CACHEABLE_OPS`. */
   readonly enabled?: readonly string[];
   /** Mutating ops that trigger invalidation. Default: every op in `DEFAULT_INVALIDATING_OPS`. */
