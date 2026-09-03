@@ -4,6 +4,32 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-09-02
+
+### Added
+
+- **`@classytic/repo-core/loader` — `createBatchLoader`.** Read-side counterpart
+  of a kit's `bulkWrite`: keys issued anywhere in one tick coalesce into a single
+  `batch()` call, so a per-item read in a loop costs one round trip instead of N.
+  Create one per operation — it caches, so its lifetime is a correctness
+  property and the caller owns it.
+
+  Refuses rather than guesses, in three places that otherwise return a plausible
+  wrong answer with nothing reported:
+  - a `batch()` result whose length differs from the keys (a short array shifts
+    every later value onto the wrong key, and each value is individually valid);
+  - an object key with no `keyOf` (`String({})` is `[object Object]` for every
+    object, so the default would merge unrelated keys AND report the collisions
+    as cache hits);
+  - a non-integer or `< 1` `maxBatchSize` (`Math.max(1, NaN)` is `NaN`, and a
+    `NaN` stride abandons every waiter with no error) — same validation
+    `repository/purge.ts` already applies to this parameter.
+
+  Known limits: chunks beyond `maxBatchSize` run concurrently with no cap, and a
+  sequential `for … await loader.load(x)` loop batches nothing by construction
+  (each `await` closes the microtask window). Use `loadMany` or `Promise.all`,
+  and read `stats.batches` to confirm the round-trip count you expected.
+
 ## [0.25.0] - 2026-08-24
 
 ### Added
