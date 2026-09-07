@@ -106,7 +106,9 @@ export function createBatchLoader<K, V>(options: BatchLoaderOptions<K, V>): Batc
     options.keyOf ??
     ((k: K): string => {
       if (k !== null && typeof k === 'object') {
-        throw new TypeError('batch loader: an object key needs an explicit `keyOf` — String(key) collides them all');
+        throw new TypeError(
+          'batch loader: an object key needs an explicit `keyOf` — String(key) collides them all',
+        );
       }
       return String(k);
     });
@@ -115,7 +117,9 @@ export function createBatchLoader<K, V>(options: BatchLoaderOptions<K, V>): Batc
   // over an empty slice and abandon every waiter with no error. Same guard the
   // package already applies to this parameter in `repository/purge.ts`.
   if (!Number.isInteger(requested) || requested < 1) {
-    throw new TypeError(`batch loader: maxBatchSize must be a positive integer, received ${String(requested)}`);
+    throw new TypeError(
+      `batch loader: maxBatchSize must be a positive integer, received ${String(requested)}`,
+    );
   }
   const maxBatchSize = requested;
 

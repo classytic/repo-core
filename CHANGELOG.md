@@ -4,6 +4,33 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.1] - 2026-09-08
+
+### Fixed
+
+- **`vitest` is no longer declared as a peer dependency.** It was
+  `peerDependencies: { vitest: "^3.0.0 || ^4.0.0" }` with
+  `peerDependenciesMeta.optional: true` — and that combination does not do what
+  it looks like. `optional: true` only silences the *missing* case; npm still
+  hard-fails `ERESOLVE` on a version **mismatch**. So every consumer on a newer
+  vitest could not install repo-core at all, even though nothing they imported
+  touched it.
+
+  Measured: `@classytic/arc` could not move to vitest 5 — `npm install` failed
+  with `Conflicting peer dependency: vitest@5.0.0`, sourced to this package.
+  Widening the range to `|| ^5.0.0` would only have moved the wall to vitest 6.
+
+  `vitest` is the CONSUMER's test runner. Anyone importing
+  `@classytic/repo-core/testing` is by definition already inside a vitest suite
+  that provides it, so the import resolves from their install; anyone who does
+  not import it should never have been constrained. It stays in
+  `devDependencies` for this package's own suite, and `tsdown`'s `neverBundle`
+  now lists `vitest` so the bundler keeps the import external instead of
+  inlining a dev-only dependency into shipped output.
+
+  Any vitest exposing the standard `describe` / `it` / `expect` / `beforeEach` /
+  `afterEach` API works with the `/testing` conformance suites.
+
 ## [0.26.0] - 2026-09-02
 
 ### Added

@@ -67,7 +67,16 @@ export default defineConfig({
     // that would not fire is cheap, and a gate that stops matching after a scope rename
     // reports success while protecting nothing (commerce/AGENTS.md §"eight things that
     // are NOT a source grep").
-    neverBundle: [/^@classytic\//, /^@spinekit\//],
+    // `vitest` is imported by the `./testing` conformance suites but is
+    // deliberately NOT a dependency or a peer — it is the CONSUMER's test
+    // runner, and anyone importing `./testing` is by definition inside a vitest
+    // suite that already provides it. Declaring it as a peer (even
+    // `optional: true`) only suppresses the "missing" error; npm still hard-fails
+    // ERESOLVE on a version MISMATCH, so every consumer on a newer vitest broke
+    // on install while never importing `./testing` at all. It lives in
+    // devDependencies for this package's own tests, which means the bundler
+    // would happily inline it — this gate keeps the import external.
+    neverBundle: [/^@classytic\//, /^@spinekit\//, /^vitest$/],
   },
   publint: 'ci-only',
   attw: 'ci-only',

@@ -36,9 +36,9 @@
 
 import type { RepositoryBase } from '../../repository/base.js';
 import type { Plugin } from '../../repository/plugin-types.js';
+import type { CacheAdapterSource } from '../engine.js';
 import { CacheEngine } from '../engine.js';
 import type { CacheOptions, CacheReadResult } from '../options.js';
-import type { CacheAdapterSource } from '../engine.js';
 import { DEFAULT_SHAPE_KEYS_BY_OP } from './context.js';
 import { registerInvalidationHooks } from './invalidation-hooks.js';
 import { registerReadHooks } from './read-hooks.js';

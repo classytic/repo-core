@@ -198,19 +198,24 @@ describe('createBatchLoader', () => {
  */
 describe('createBatchLoader — refusals', () => {
   it('REFUSES an object key with no keyOf instead of collapsing them to [object Object]', async () => {
-    const loader = createBatchLoader<{ sku: string }, string>({ batch: async (k) => k.map(() => 'X') });
+    const loader = createBatchLoader<{ sku: string }, string>({
+      batch: async (k) => k.map(() => 'X'),
+    });
 
     expect(() => loader.load({ sku: 'a' })).toThrow(/needs an explicit `keyOf`/);
   });
 
-  it.each([Number.NaN, 0, -1, 2.5, Number.POSITIVE_INFINITY])(
-    'REFUSES maxBatchSize %p at construction rather than hanging every waiter',
-    (bad) => {
-      expect(() => createBatchLoader<string, string>({ batch: async (k) => [...k], maxBatchSize: bad })).toThrow(
-        /positive integer/,
-      );
-    },
-  );
+  it.each([
+    Number.NaN,
+    0,
+    -1,
+    2.5,
+    Number.POSITIVE_INFINITY,
+  ])('REFUSES maxBatchSize %p at construction rather than hanging every waiter', (bad) => {
+    expect(() =>
+      createBatchLoader<string, string>({ batch: async (k) => [...k], maxBatchSize: bad }),
+    ).toThrow(/positive integer/);
+  });
 
   it('clear(key) does not abandon the caller already waiting on an in-flight fetch', async () => {
     let n = 0;
@@ -257,7 +262,9 @@ describe('createBatchLoader — requireAllResolved', () => {
   });
 
   it('is OFF by default — a genuine existence check still returns undefined', async () => {
-    const loader = createBatchLoader<string, string>({ batch: async (keys) => keys.map(() => undefined) });
+    const loader = createBatchLoader<string, string>({
+      batch: async (keys) => keys.map(() => undefined),
+    });
 
     expect(await loader.load('nope')).toBeUndefined();
   });
