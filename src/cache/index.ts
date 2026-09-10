@@ -46,6 +46,7 @@ export {
   type CacheEngineOptions,
   type SingleFlightClaim,
 } from './engine.js';
+export { createTtlMemo, type TtlMemo, type TtlMemoOptions } from './memo.js';
 export {
   createMemoryCacheAdapter,
   type MemoryCacheAdapterOptions,

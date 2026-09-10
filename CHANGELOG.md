@@ -4,6 +4,23 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-09-09
+
+### Added
+
+- **`createTtlMemo(load, { ttlMs, keyOf?, maxEntries? })`** on `./cache` — the
+  one way to memoise a keyed async load for a while. It is `CacheEngine.prefetch`
+  over the memory adapter, so concurrent misses for one key share ONE load, a
+  thrown load caches nothing, and a `null` result is an answer.
+
+  Four packages had each hand-rolled `Map<key, { at, value }>` with a TTL, and
+  every one wrote its entry AFTER the await. Under parallel event dispatch N
+  callers reach the await together, all miss, and the cache only ever helps the
+  caller after them — a 30 s TTL that measured nine reads of one row per event.
+  `tests/unit/cache/ttl-memo.test.ts` pins single flight, expiry, invalidation,
+  `ttlMs: 0` = off, and refuses an object key without `keyOf` (an
+  identity-compared key never hits and reads as a caching bug).
+
 ## [0.26.1] - 2026-09-08
 
 ### Fixed
