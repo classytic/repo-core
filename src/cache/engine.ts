@@ -182,7 +182,13 @@ export class CacheEngine {
     }
     // Node 22+ ships `Promise.withResolvers()` natively — zero
     // indirection on the single-flight hot path.
-    this.pending.set(key, Promise.withResolvers<unknown>());
+    const deferred = Promise.withResolvers<unknown>();
+    // Waiters may never arrive. Mark the promise as observed so rejecting it
+    // for nobody is not an unhandled rejection; a waiter that does `await` it
+    // still receives the error — this handler is on a derived promise, not
+    // in their way.
+    deferred.promise.catch(() => {});
+    this.pending.set(key, deferred);
     return { status: 'claimed' };
   }
 

@@ -4,6 +4,20 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.1] - 2026-09-11
+
+### Fixed
+
+- **A failed single-flight fetch with no concurrent waiter raised an
+  `unhandledRejection`** — in addition to the error the caller had already
+  caught. `claimPending` creates a deferred for waiters that may never arrive;
+  rejecting it for nobody made a working `try/catch` a process crash under
+  `--unhandled-rejections=strict`. Reached from `CacheEngine.prefetch`, so from
+  every `createTtlMemo` consumer, and from the plugin read path. The deferred is
+  now marked observed at creation; a waiter that does exist still receives the
+  rejection. `tests/unit/cache/single-flight-unobserved-rejection.test.ts` pins
+  the single-caller case the existing two-caller test could never reach.
+
 ## [0.27.0] - 2026-09-09
 
 ### Added
