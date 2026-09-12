@@ -2045,6 +2045,14 @@ export interface ChangeEvent<TDoc = unknown> {
   doc?: TDoc;
   /** Commit timestamp as reported by the backend. */
   timestamp: Date;
+  /**
+   * Resume token for THIS event (kit-specific opaque shape — Mongo's
+   * change-document `_id`). Persist the last one you finished processing
+   * and hand it back as `WatchOptions.resumeAfter` / `startAfter` to
+   * continue from that point across restarts. Absent on backends whose
+   * feed is not resumable.
+   */
+  resumeToken?: unknown;
 }
 
 /** Options for `StandardRepo.watch()`. */
@@ -2057,6 +2065,12 @@ export interface WatchOptions {
    * for at-least-once consumption across restarts.
    */
   resumeAfter?: unknown;
+  /**
+   * Like `resumeAfter`, but also resumes past an invalidate event (Mongo
+   * `startAfter` — the token of the invalidate itself). Mutually exclusive
+   * with `resumeAfter`; kits reject a call that sets both.
+   */
+  startAfter?: unknown;
 }
 
 /**
