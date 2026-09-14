@@ -64,7 +64,7 @@ export {
   type ReadOnlyRepoOptions,
   ReadOnlyRepositoryError,
 } from './read-only.js';
-export { type RetryPolicy, throwIfAborted, withRetry } from './resilience.js';
+export { isTransientError, type RetryPolicy, throwIfAborted, withRetry } from './resilience.js';
 export {
   type RetryingTransactionOptions,
   retryingTransaction,

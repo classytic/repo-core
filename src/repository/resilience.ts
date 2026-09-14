@@ -27,6 +27,64 @@
  * }
  * ```
  */
+/**
+ * Error labels and names that mean "the operation may not have run — running
+ * it again is safe". Duck-typed so `repo-core` stays driver-free: MongoDB sets
+ * these labels, and other drivers surface the same idea under these names.
+ */
+const TRANSIENT_LABELS = ['RetryableWriteError', 'TransientTransactionError'] as const;
+const TRANSIENT_PATTERN =
+  /WriteConflict|LockTimeout|NotWritablePrimary|NotPrimary|PrimarySteppedDown|InterruptedDueToReplStateChange|ShutdownInProgress|HostUnreachable|HostNotFound|NetworkTimeout|SocketException|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|SQLITE_BUSY|SQLITE_LOCKED|MongoNetworkError/i;
+
+/**
+ * The default `shouldRetry`: retry a failure that may not have happened, never
+ * one that definitely did.
+ *
+ * This used to be `() => true`, with a comment conceding it was unsafe and
+ * asking callers to pass their own. That is a documented hazard rather than a
+ * fence — a policy set for network blips also re-ran the write on a duplicate
+ * key, a validation failure and a permission denial, three times, with backoff.
+ * For a non-idempotent write that is not a slow failure, it is a double write.
+ *
+ * Retried: replica-set failover, write conflicts, lock timeouts, socket errors
+ * — states where the outcome is genuinely unknown.
+ *
+ * NOT retried: anything the server answered deterministically. A 4xx-shaped
+ * `statusCode` is treated as final, since repo-core's own `HttpError` carries
+ * one and every kit maps validation/permission failures onto it.
+ *
+ * Pass `shouldRetry: () => true` to restore the old behaviour explicitly — the
+ * point is that it is now a choice someone made, not a default they inherited.
+ */
+export function isTransientError(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false;
+  const e = err as {
+    hasErrorLabel?: (label: string) => boolean;
+    statusCode?: number;
+    code?: unknown;
+    codeName?: unknown;
+    name?: unknown;
+    message?: unknown;
+  };
+
+  if (typeof e.hasErrorLabel === 'function') {
+    for (const label of TRANSIENT_LABELS) {
+      try {
+        if (e.hasErrorLabel(label)) return true;
+      } catch {
+        // A hostile/partial error object must not break the retry decision.
+      }
+    }
+  }
+
+  // A deterministic client-side answer is final however transient it looks.
+  if (typeof e.statusCode === 'number' && e.statusCode >= 400 && e.statusCode < 500) return false;
+
+  return TRANSIENT_PATTERN.test(
+    `${String(e.name ?? '')} ${String(e.codeName ?? '')} ${String(e.code ?? '')} ${String(e.message ?? '')}`,
+  );
+}
+
 export interface RetryPolicy {
   /** Max attempts (including the first try). Default 3 when a policy is present. */
   maxAttempts?: number;
@@ -42,10 +100,13 @@ export interface RetryPolicy {
    */
   jitter?: boolean;
   /**
-   * Decide whether a given error is transient. Default: retry every error —
-   * kept for back-compat, but UNSAFE as a shared default (it re-runs side
-   * effects on deterministic failures); pass an explicit predicate.
-   * `retryingTransaction` always does.
+   * Decide whether a given error is transient.
+   *
+   * Defaults to {@link isTransientError}: retry a failure that MAY not have
+   * happened (failover, write conflict, socket error), never one that
+   * definitely did (duplicate key, validation, permission). Pass
+   * `() => true` to retry everything — allowed, but as a decision rather
+   * than an inheritance.
    */
   shouldRetry?: (err: unknown, attempt: number) => boolean;
 }
@@ -88,7 +149,7 @@ export async function withRetry<T>(
 
   const maxAttempts = policy.maxAttempts ?? 3;
   const baseDelayMs = policy.baseDelayMs ?? 100;
-  const shouldRetry = policy.shouldRetry ?? (() => true);
+  const shouldRetry = policy.shouldRetry ?? isTransientError;
 
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {

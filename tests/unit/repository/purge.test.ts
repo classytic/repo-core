@@ -23,7 +23,7 @@ describe('runChunkedPurge — retry + signal', () => {
 
     const result = await runChunkedPurge(
       HARD,
-      { batchSize: 10, retry: { maxAttempts: 3, baseDelayMs: 1 } },
+      { batchSize: 10, retry: { maxAttempts: 3, baseDelayMs: 1, shouldRetry: () => true } },
       port,
     );
 
@@ -49,7 +49,7 @@ describe('runChunkedPurge — retry + signal', () => {
       {
         batchSize: 10,
         signal: controller.signal,
-        retry: { maxAttempts: 5, baseDelayMs: 50 },
+        retry: { maxAttempts: 5, baseDelayMs: 50, shouldRetry: () => true },
       },
       port,
     );

@@ -37,7 +37,7 @@ describe('withRetry', () => {
         if (calls < 3) throw new Error('transient');
         return 'recovered';
       },
-      { maxAttempts: 3, baseDelayMs: 1 },
+      { maxAttempts: 3, baseDelayMs: 1, shouldRetry: () => true },
     );
     expect(result).toBe('recovered');
     expect(calls).toBe(3);
@@ -51,7 +51,7 @@ describe('withRetry', () => {
           calls++;
           throw new Error(`fail-${calls}`);
         },
-        { maxAttempts: 2, baseDelayMs: 1 },
+        { maxAttempts: 2, baseDelayMs: 1, shouldRetry: () => true },
       ),
     ).rejects.toThrow('fail-2');
     expect(calls).toBe(2);
@@ -85,7 +85,7 @@ describe('withRetry', () => {
           controller.abort(new Error('cancelled'));
           throw new Error('transient');
         },
-        { maxAttempts: 5, baseDelayMs: 1 },
+        { maxAttempts: 5, baseDelayMs: 1, shouldRetry: () => true },
         controller.signal,
       ),
     ).rejects.toThrow('cancelled');

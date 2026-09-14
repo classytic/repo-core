@@ -117,7 +117,7 @@ describe('runChunkedArchive', () => {
     };
 
     const result = await runChunkedArchive(
-      { retry: { maxAttempts: 3, baseDelayMs: 1 } },
+      { retry: { maxAttempts: 3, baseDelayMs: 1, shouldRetry: () => true } },
       sink,
       arrayPort(rows),
     );

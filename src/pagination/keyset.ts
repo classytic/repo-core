@@ -84,16 +84,11 @@ export function validateKeysetSort(
     }
   }
 
-  for (const key of nonIdKeys) {
-    if (sort[key] !== primaryDirection) {
-      throw new Error('All sort fields must share the same direction for keyset pagination');
-    }
-  }
-
-  if (keys.includes('_id') && sort['_id'] !== primaryDirection) {
-    throw new Error('_id direction must match primary field direction');
-  }
-
+  // Mixed directions are allowed: the keyset predicate is a tuple comparison
+  // whose operator is chosen per position, so `{ priority: 1, createdAt: -1 }`
+  // (the ESR-shaped index) paginates correctly. Each kit's filter builder must
+  // read the direction per field — mongokit's `buildKeysetFilter` does.
+  // `_id` keeps the caller's direction; absent, it follows the primary field.
   if (!keys.includes('_id')) {
     return normalizeSort({ ...sort, _id: primaryDirection });
   }

@@ -4,6 +4,90 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-09-14
+
+### Changed — BREAKING: `RetryPolicy.shouldRetry` no longer defaults to retrying everything
+
+`shouldRetry` defaulted to `() => true`, with a comment conceding it was unsafe
+and asking callers to pass their own. That is a documented hazard, not a fence:
+a policy added for network blips also re-ran the write on a duplicate key, a
+validation failure and a permission denial — three times, with backoff. Against
+a slow-but-succeeding server and a non-idempotent write, that is a double write.
+
+The default is now **`isTransientError`** (exported from `./repository`): retry
+a failure that MAY not have happened — failover, write conflict, lock timeout,
+socket error — never one the server answered deterministically. A 4xx-shaped
+`statusCode` is treated as final, since `HttpError` carries one and every kit
+maps validation and permission failures onto it.
+
+**Migration:** a caller relying on retry-everything passes `shouldRetry: () => true`
+explicitly. The point is that it is now a decision rather than an inheritance.
+Tests exercising retry MECHANICS should pass a predicate too, so they stop
+depending on how a generic `Error` happens to be classified.
+
+### Added
+
+- **`resumeToken` on `ChangeEvent`, `startAfter` on `WatchOptions`.** `watch()`
+  already accepted a resume token but a consumer had no way to obtain one, so
+  the documented at-least-once-across-restarts contract was unfulfillable.
+  Persist the last event's `resumeToken` and hand it back as `resumeAfter` (or
+  `startAfter`, which also resumes past an invalidate event) to continue from
+  that point. Additive — a kit whose feed is not resumable leaves the field
+  absent.
+
+- **`AggRequest.countDistinctStrategy`** — `'accumulator'` (default) or
+  `'grouped'`. The default holds every distinct value of a group in that
+  group's accumulator, so memory grows with the data and MongoDB caps it at
+  100MB; `'grouped'` pre-groups by the distinct field so each value becomes a
+  row instead, and nothing accumulates. Results are identical — including that
+  a missing field is not a distinct value while an explicit `null` is. Kits
+  refuse the measure combinations they cannot recombine (`avg`, `percentile`,
+  `stddev`, a second `countDistinct`) rather than approximating them.
+
+- **`prev` / `hasPrev` on `KeysetPaginationResultCore`** — the backward half of
+  cursor pagination, for kits that implement a `before` cursor (mongokit does,
+  >= 3.39.0). Both are OPTIONAL, so a kit that only pages forward is unchanged.
+
+  `prev === undefined` means *"this kit does not answer the question"*, NOT
+  *"there is no previous page"*. A UI must read `hasPrev` to decide whether to
+  offer the control and treat absent as unknown — reading `undefined` as `false`
+  hides a control that should be there.
+
+### Changed
+
+- **`validateKeysetSort` accepts mixed sort directions.** `{ priority: 1,
+  createdAt: -1 }` — the ESR-shaped compound index — used to throw. The keyset
+  predicate is a tuple comparison whose operator is chosen per position, so the
+  directions never needed to agree; rejecting them pushed callers onto offset
+  `skip(n)`, the cost keyset exists to avoid. `_id` now keeps the direction the
+  caller gave it, and still follows the primary field when absent.
+
+  **A kit's filter builder must read the direction PER FIELD** to consume this
+  safely. mongokit's `buildKeysetFilter` does (>= 3.39.0). A kit that derives
+  one operator from the primary field will now silently mis-paginate a
+  mixed-direction sort instead of being protected by the throw — audit yours
+  before upgrading.
+
+### Fixed
+
+- **A cached `getAll` page was served to a caller that asked for a different
+  count strategy.** `countStrategy` / `countLimit` were missing from
+  `DEFAULT_SHAPE_KEYS_BY_OP.getAll`, so every strategy shared one cache key —
+  and the strategies disagree about `total` BY DESIGN: `'none'` reports `0`,
+  `'capped'` reports a flagged ceiling, `'exact'` reports the truth. A list
+  asking for an exact count could therefore render `0 results` over a full page
+  of rows, with nothing reporting an error. Both keys are now on the allowlist.
+
+  `mode` remains off it deliberately — it selects which ENVELOPE comes back, and
+  offset vs keyset are already separated by `page` vs `after`.
+
+  **On deploy this invalidates existing `getAll` cache entries once** (the key
+  shape changed); the next read repopulates them.
+
+  Pinned by mongokit's `plugin-composition-security.test.ts`, whose
+  `countStrategy` case had been `it.skip`ped with a comment documenting the hole
+  rather than closing it.
+
 ## [0.27.1] - 2026-09-11
 
 ### Fixed

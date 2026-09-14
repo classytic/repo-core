@@ -85,6 +85,23 @@ export const DEFAULT_SHAPE_KEYS_BY_OP: Readonly<Record<string, readonly string[]
     'page',
     'limit',
     'after',
+    /**
+     * How the page was COUNTED is part of its shape, because the count is part
+     * of the envelope the cache stores.
+     *
+     * Without these two, a page cached under one strategy is served to a caller
+     * that asked for another — and the strategies disagree about `total` by
+     * design: `'none'` reports `0`, `'capped'` reports a ceiling flagged
+     * `totalIsLowerBound`, `'exact'` reports the truth. So a list that asked
+     * for an exact count could render `0 results` over a full page of rows,
+     * with nothing anywhere reporting an error.
+     *
+     * `mode` stays out deliberately: it selects which ENVELOPE comes back
+     * (offset vs keyset), and those are already distinguished by `page` vs
+     * `after` being present.
+     */
+    'countStrategy',
+    'countLimit',
   ],
   // Filter-shaped scalars
   count: ['filter', 'filters'],

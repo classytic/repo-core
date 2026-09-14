@@ -36,14 +36,14 @@ describe('validateKeysetSort', () => {
     expect(() => validateKeysetSort({ x: 0 as never })).toThrow(/must be 1 or -1/);
   });
 
-  it('rejects mixed directions across fields', () => {
-    expect(() => validateKeysetSort({ a: 1, b: -1 })).toThrow(
-      /same direction for keyset pagination/,
-    );
+  it('accepts mixed directions across fields — the keyset predicate is per-position', () => {
+    // `{ a: 1, b: -1 }` is the ESR-shaped compound index. Rejecting it pushed
+    // callers onto offset `skip(n)`, the cost keyset exists to avoid.
+    expect(validateKeysetSort({ a: 1, b: -1 })).toEqual({ a: 1, b: -1, _id: 1 });
   });
 
-  it('rejects _id direction that contradicts primary direction', () => {
-    expect(() => validateKeysetSort({ createdAt: -1, _id: 1 })).toThrow(/_id direction must match/);
+  it('keeps an _id direction that differs from the primary', () => {
+    expect(validateKeysetSort({ createdAt: -1, _id: 1 })).toEqual({ createdAt: -1, _id: 1 });
   });
 
   it('honors allowedPrimaryFields allowlist', () => {

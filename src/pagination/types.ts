@@ -136,6 +136,18 @@ export interface KeysetPaginationResultCore<TDoc> {
   hasMore: boolean;
   /** Cursor token for the next page, or `null` when there is none. */
   next: string | null;
+  /**
+   * Cursor token for the PREVIOUS page, or `null` when this is the first.
+   * Feed it back as `before` to walk backwards.
+   *
+   * Optional so a kit that only pages forward is unchanged — but `undefined`
+   * means "this kit does not answer the question", NOT "there is no previous
+   * page". A UI must read {@link hasPrev} to decide whether to offer the
+   * control, and treat absent as unknown rather than as `false`.
+   */
+  prev?: string | null;
+  /** Whether a previous page exists. Absent when the kit does not track it. */
+  hasPrev?: boolean;
 }
 
 /**

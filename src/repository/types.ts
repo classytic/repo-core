@@ -671,6 +671,35 @@ export interface BulkWriteResult {
  */
 export type AggMeasure =
   | { op: 'count'; field?: string; where?: FilterInput }
+  /**
+   * Exact distinct count. **Bounded by group memory — see the ceiling below
+   * before using it on a high-cardinality field.**
+   *
+   * It is computed by accumulating the distinct values themselves and taking
+   * the size, so every distinct value in a group is held in that group's
+   * accumulator at once. Cheap for `countDistinct` over a status or a region;
+   * expensive over a user id, an email, or a session token, where the
+   * accumulator grows with the data rather than with the answer.
+   *
+   * MongoDB caps a single group accumulator at 100MB. Past that the pipeline
+   * fails — loudly, which is the right outcome, but it fails at the size the
+   * data reaches rather than at the size anyone planned for.
+   *
+   * Mitigations, in the order worth trying:
+   *   1. narrow the groups (`where`, a tighter `groupBy`) so each accumulator
+   *      holds less;
+   *   2. pass `allowDiskUse` so the stage may spill instead of failing — it
+   *      makes the query slow rather than impossible, and does NOT make every
+   *      accumulator shape safe;
+   *   3. for genuinely unbounded cardinality, count distinct in its own
+   *      request grouped by `(group keys, the distinct field)` and sum the
+   *      rows — one pass more, no accumulator growth.
+   *
+   * There is deliberately no approximate mode: a distinct count that is
+   * quietly within a few percent is exactly the plausible-looking wrong number
+   * this contract exists to avoid. If an estimate is acceptable, the caller
+   * should ask for one explicitly rather than inherit it.
+   */
   | { op: 'countDistinct'; field: string; where?: FilterInput }
   | { op: 'sum'; field: string; where?: FilterInput }
   | { op: 'avg'; field: string; where?: FilterInput }
@@ -1138,6 +1167,33 @@ export interface AggRequest {
    * each partition).
    */
   topN?: AggTopN;
+
+  /**
+   * How `countDistinct` is computed.
+   *
+   * - **`'accumulator'`** (default) — collect the distinct values, take the
+   *   size. One pass, and the cheapest thing there is while a group's distinct
+   *   values fit in memory. They are held in that group's accumulator at once,
+   *   so the cost grows with the DATA, not with the answer: fine over a status
+   *   or a region, and a 100MB accumulator failure over a user id or an email.
+   *
+   * - **`'grouped'`** — pre-group by the distinct field so each distinct value
+   *   becomes a row, then count rows. One extra `$group`, and nothing
+   *   accumulates: cardinality stops being a memory question. Slower on small
+   *   groups, which is why it is not the default.
+   *
+   * Results are IDENTICAL either way, including the parts that are easy to get
+   * wrong — a missing field is not a distinct value, an explicit `null` is, and
+   * `where` excludes rows from the count without excluding them from the other
+   * measures. `tests/integration/countdistinct-strategies.test.ts` asserts the
+   * two strategies agree row for row rather than asserting expected numbers,
+   * because a strategy that is merely self-consistent is the failure mode.
+   *
+   * `'grouped'` REFUSES a measure set it cannot re-aggregate (`avg`,
+   * `percentile`, `stddev`, or a second `countDistinct`) instead of returning a
+   * plausible wrong number — see the error for the alternatives.
+   */
+  countDistinctStrategy?: 'accumulator' | 'grouped';
 
   /**
    * Driver-tunable performance knobs (allowDiskUse, maxTimeMs,
@@ -2071,6 +2127,34 @@ export interface WatchOptions {
    * with `resumeAfter`; kits reject a call that sets both.
    */
   startAfter?: unknown;
+  /**
+   * Ceiling on events held between the stream and a slower consumer.
+   * Default 1024. `0` disables the bound; any other non-positive-integer
+   * (negative, fractional, `Infinity`, `NaN`) is REFUSED rather than treated
+   * as unbounded — silently removing the ceiling is the failure this option
+   * exists to prevent.
+   *
+   * A change feed has no backpressure: the server pushes, and a kit bridging
+   * it into an async iterator buffers whatever the consumer has not reached.
+   * An unbounded buffer therefore turns a consumer that is merely SLOWER than
+   * the write rate into unbounded memory growth — and the symptom is an OOM
+   * far from the cause.
+   *
+   * Overflow ends the iterator with an error carrying `resumeToken` — the last
+   * event the consumer ACKNOWLEDGED, meaning the last one it came back from.
+   * Deliberately not the last DELIVERED event: resuming past one the consumer
+   * was still processing drops it. The error also carries `deliveredToken` for
+   * diagnostics; resuming from that reintroduces the loss.
+   *
+   * It never drops events either way. A change feed silently missing a delete
+   * is the kind of wrong that surfaces as a reconciliation mystery months
+   * later, so the asymmetry is chosen on purpose: redelivering costs a
+   * duplicate, skipping costs a lost write.
+   *
+   * A change stream is an INGESTION mechanism, not a durable queue. Consumers
+   * that must not miss events persist the resume token and stay idempotent.
+   */
+  maxBufferedEvents?: number;
 }
 
 /**
