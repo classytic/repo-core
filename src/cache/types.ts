@@ -69,13 +69,14 @@ export interface CacheAdapter {
    * difference is the 178× slowdown the in-memory benchmark surfaced.
    *
    * **Implementation guidance:**
-   *   - Redis: `SADD key m1 m2 ...` + `EXPIRE key ttlSeconds NX`
+   *   - Redis: `SADD key m1 m2 ...` + `EXPIRE key ttlSeconds GT` (Redis ≥ 7; `NX` is wrong, see below)
    *   - Memory: in-place push on the underlying array (no copy)
    *   - DynamoDB: `UpdateItem` with `ADD` action on a String Set
    *   - Cloudflare KV / pure GET-SET stores: omit; engine falls back.
    *
-   * `ttlSeconds` is applied only when the key is created — existing
-   * sets keep their original expiry (Redis NX semantics).
+   * `ttlSeconds` EXTENDS the set's expiry and never shortens it (Redis `GT` semantics). A set used
+   * as a tag index must outlive its newest member; keeping the creation-time expiry lets the index
+   * vanish while members live on, and invalidating the tag then misses them.
    */
   addToSet?(key: string, members: readonly string[], ttlSeconds?: number): Promise<number> | number;
 

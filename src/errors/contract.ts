@@ -5,8 +5,8 @@
  * `Error` from third-party code.
  */
 
-import type { ErrorCode, ErrorContract, HttpError } from './types.js';
-import { ERROR_CODES } from './types.js';
+import { DUPLICATE_KEY_DETAIL_CODE, ERROR_CODES, type ErrorCode } from './codes.js';
+import type { ErrorContract, HttpError } from './types.js';
 
 /**
  * Map an HTTP status code to the canonical {@link ErrorCode}. Used as a
@@ -67,7 +67,7 @@ export function statusToErrorCode(status: number): ErrorCode {
 export function toErrorContract(error: unknown): ErrorContract {
   if (!(error instanceof Error)) {
     return {
-      code: 'internal_error',
+      code: ERROR_CODES.INTERNAL,
       message: typeof error === 'string' ? error : 'Internal error',
       status: 500,
     };
@@ -104,7 +104,7 @@ export function toErrorContract(error: unknown): ErrorContract {
     for (const field of e.duplicate.fields) {
       details.push({
         path: field,
-        code: 'duplicate_key',
+        code: DUPLICATE_KEY_DETAIL_CODE,
         message: `Duplicate value for "${field}"`,
       });
     }

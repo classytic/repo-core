@@ -81,13 +81,16 @@ export class CacheEngine {
   private readonly prefix: string;
   private readonly jitter: (ttl: number) => number;
   /**
-   * In-flight fetches keyed by cache-key. Process-local (lives in this
-   * engine instance) — server restart clears it; cross-pod fanout is
-   * fine because each pod runs its own single-flight, and downstream
-   * load is bounded to N-pods worst case (a huge improvement over
-   * unbounded burst).
+   * In-flight fetches, partitioned by the RESOLVED adapter, then keyed by cache-key. A scoped store
+   * (per request, per job) gets its own partition, so two scopes reading the same key never share a
+   * result — and a finished scope's partition is collected with its store. Process-local; cross-pod
+   * fanout is bounded to N pods.
    */
-  private readonly pending = new Map<string, PromiseWithResolvers<unknown>>();
+  private readonly pending = new WeakMap<
+    CacheAdapter,
+    Map<string, PromiseWithResolvers<unknown>>
+  >();
+  private pendingTotal = 0;
 
   constructor(adapter: CacheAdapterSource, options: CacheEngineOptions = {}) {
     // A plain adapter is the degenerate resolver. Normalising here keeps every
@@ -165,7 +168,19 @@ export class CacheEngine {
    * pending.
    */
   getPending<T = unknown>(key: string): Promise<T> | undefined {
-    return this.pending.get(key)?.promise as Promise<T> | undefined;
+    return this.pendingIn(false)?.get(key)?.promise as Promise<T> | undefined;
+  }
+
+  /** This scope's in-flight partition; `undefined` when no store is in scope (never coalesce there). */
+  private pendingIn(create: boolean): Map<string, PromiseWithResolvers<unknown>> | undefined {
+    const adapter = this.resolveAdapter();
+    if (!adapter) return undefined;
+    let partition = this.pending.get(adapter);
+    if (!partition && create) {
+      partition = new Map();
+      this.pending.set(adapter, partition);
+    }
+    return partition;
   }
 
   /**
@@ -176,7 +191,10 @@ export class CacheEngine {
    * with the first claimer's result.
    */
   claimPending<T = unknown>(key: string): SingleFlightClaim<T> {
-    const existing = this.pending.get(key);
+    const partition = this.pendingIn(true);
+    // No store in scope: the caller fetches alone. Coalescing here would join another scope's fetch.
+    if (!partition) return { status: 'claimed' };
+    const existing = partition.get(key);
     if (existing) {
       return { status: 'wait', promise: existing.promise as Promise<T> };
     }
@@ -188,15 +206,18 @@ export class CacheEngine {
     // still receives the error — this handler is on a derived promise, not
     // in their way.
     deferred.promise.catch(() => {});
-    this.pending.set(key, deferred);
+    partition.set(key, deferred);
+    this.pendingTotal += 1;
     return { status: 'claimed' };
   }
 
   /** Resolve an in-flight claim with the fresh result + clear it. */
   resolvePending<T>(key: string, value: T): void {
-    const deferred = this.pending.get(key);
-    if (!deferred) return;
-    this.pending.delete(key);
+    const partition = this.pendingIn(false);
+    const deferred = partition?.get(key);
+    if (!partition || !deferred) return;
+    partition.delete(key);
+    this.pendingTotal -= 1;
     (deferred as PromiseWithResolvers<T>).resolve(value);
   }
 
@@ -206,15 +227,17 @@ export class CacheEngine {
    * whether to retry on a higher level.
    */
   rejectPending(key: string, error: unknown): void {
-    const deferred = this.pending.get(key);
-    if (!deferred) return;
-    this.pending.delete(key);
+    const partition = this.pendingIn(false);
+    const deferred = partition?.get(key);
+    if (!partition || !deferred) return;
+    partition.delete(key);
+    this.pendingTotal -= 1;
     deferred.reject(error);
   }
 
   /** Internal — number of in-flight fetches; observability hook. */
   get pendingCount(): number {
-    return this.pending.size;
+    return this.pendingTotal;
   }
 
   // ── Invalidation ─────────────────────────────────────────────────

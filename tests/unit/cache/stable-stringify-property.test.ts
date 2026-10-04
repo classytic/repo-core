@@ -326,3 +326,29 @@ describe('stableStringify — circular references', () => {
     expect(() => stableStringify(arr)).toThrow();
   });
 });
+
+/** The other direction: DIFFERENT values must never share a string — a shared key serves the wrong result. */
+describe('stableStringify — distinct values stay distinct', () => {
+  it.each([
+    ['a delimiter inside a string', { a: 'x,b:y' }, { a: 'x', b: 'y' }],
+    ['a number and its string', { n: 1 }, { n: '1' }],
+    ['two different dates', { at: new Date('2026-01-01') }, { at: new Date('2027-06-30') }],
+    ['two different regexes', { q: /abc/i }, { q: /xyz/ }],
+    ['a regex and its flags', { q: /abc/i }, { q: /abc/ }],
+    ['null and the string "null"', { v: null }, { v: 'null' }],
+  ])('%s', (_label, a, b) => {
+    expect(stableStringify(a)).not.toBe(stableStringify(b));
+  });
+
+  it('serialises like the JSON wire: a Date is its ISO string, undefined is absent', () => {
+    expect(stableStringify({ at: new Date('2026-01-01T00:00:00.000Z') })).toBe(
+      stableStringify(JSON.parse(JSON.stringify({ at: new Date('2026-01-01T00:00:00.000Z') }))),
+    );
+    expect(stableStringify({ a: 1, b: undefined })).toBe(stableStringify({ a: 1 }));
+    expect(stableStringify([1, undefined])).toBe('[1,null]');
+  });
+
+  it('orders keys by code unit, independent of locale', () => {
+    expect(stableStringify({ b: 1, B: 2, a: 3 })).toBe('{"B":2,"a":3,"b":1}');
+  });
+});

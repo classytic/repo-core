@@ -69,8 +69,8 @@ export async function appendKeyToTags(
       const idxKey = tagIndexKey(prefix, tag);
       const existing = (await adapter.get(idxKey)) as string[] | undefined;
       const current = Array.isArray(existing) ? existing : [];
-      if (current.includes(cacheKey)) return;
-      const next = [...current, cacheKey];
+      // Re-set even when already listed: the entry was just re-cached, so the index must live on.
+      const next = current.includes(cacheKey) ? current : [...current, cacheKey];
       await adapter.set(idxKey, next, indexTtl);
     }),
   );

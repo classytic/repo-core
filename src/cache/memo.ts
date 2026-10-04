@@ -6,6 +6,10 @@
  * only ever helped the caller after them. This is `CacheEngine.prefetch` over
  * the memory adapter: concurrent misses share one load, a thrown load caches
  * nothing, and a `null` result is an answer.
+ *
+ * `invalidate` is FENCED by a generation in the slot key: a load already in flight writes to the
+ * superseded slot, which nothing reads, so it can never repopulate the memo after an invalidation
+ * — and a `get` after the invalidation never joins that load either.
  */
 
 import { CacheEngine } from './engine.js';
@@ -49,6 +53,12 @@ export function createTtlMemo<K, V>(
     enabled: ttlMs > 0,
   };
 
+  const limit = maxEntries ?? 10_000;
+  /** Bumped by a full `invalidate()`; per-key generations exist only for keys invalidated since. */
+  let epoch = 0;
+  const generations = new Map<string, number>();
+  const slot = (base: string): string => `${base}#${epoch}.${generations.get(base) ?? 0}`;
+
   const toKey = (key: K): string => {
     if (keyOf) return `${PREFIX}:${keyOf(key)}`;
     const t = typeof key;
@@ -60,15 +70,19 @@ export function createTtlMemo<K, V>(
 
   return {
     get(key: K): Promise<V> {
-      const k = toKey(key);
-      return engine.prefetch<V>(k, resolved, () => load(key));
+      return engine.prefetch<V>(slot(toKey(key)), resolved, () => load(key));
     },
     async invalidate(key?: K): Promise<void> {
-      if (key === undefined) {
+      if (key === undefined || generations.size >= limit) {
+        epoch += 1;
+        generations.clear();
         await engine.clear();
         return;
       }
-      await adapter.delete(toKey(key));
+      const base = toKey(key);
+      const superseded = slot(base);
+      generations.set(base, (generations.get(base) ?? 0) + 1);
+      await adapter.delete(superseded);
     },
   };
 }

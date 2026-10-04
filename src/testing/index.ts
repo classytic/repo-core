@@ -20,6 +20,11 @@
  */
 
 export { runStandardRepoConformance } from './conformance.js';
+export type { IdempotencyConformanceHarness } from './idempotency-conformance.js';
+export {
+  idempotencyStoreCases,
+  runIdempotencyStoreConformance,
+} from './idempotency-conformance.js';
 export type { LockConformanceHarness } from './lock-conformance.js';
 
 export { runLockAdapterConformance } from './lock-conformance.js';
@@ -28,6 +33,17 @@ export type {
   PurgeConformanceHarness,
 } from './purge-conformance.js';
 export { runPurgeConformance } from './purge-conformance.js';
+export {
+  QUERY_GRAMMAR_DOCS,
+  QUERY_GRAMMAR_FILTER_CASES,
+  QUERY_GRAMMAR_PAGING_CASES,
+  QUERY_GRAMMAR_REFUSED,
+  type QueryGrammarCaseOptions,
+  type QueryGrammarConformanceOptions,
+  type QueryGrammarHarness,
+  type QueryGrammarParsed,
+  runQueryGrammarConformance,
+} from './query-grammar-conformance.js';
 export type {
   AggregateOpsSupport,
   ConformanceContext,

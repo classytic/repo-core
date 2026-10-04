@@ -102,16 +102,20 @@ export function createMemoryCacheAdapter(options: MemoryCacheAdapterOptions = {}
     addToSet(key: string, members: readonly string[], ttlSeconds = 60): number {
       const existing = readUnexpired(key);
       let set: Set<string>;
+      const expiry = ttlSeconds === 0 ? 0 : now() + ttlSeconds * 1000;
       if (existing && existing.value instanceof Set) {
         set = existing.value as Set<string>;
+        // GT: extend to the newest member's horizon, never shorten (0 = never expires).
+        if (existing.expiresAt !== 0 && (expiry === 0 || expiry > existing.expiresAt)) {
+          existing.expiresAt = expiry;
+        }
       } else {
         set = new Set();
         // If `existing` was a non-Set value (e.g. previously written
         // via `set`), addToSet replaces it with a Set — same semantic
         // as Redis where SADD on a non-set key throws (we accept the
         // overwrite as a more forgiving behavior).
-        const expiresAt = existing?.expiresAt ?? (ttlSeconds === 0 ? 0 : now() + ttlSeconds * 1000);
-        store.set(key, { value: set, expiresAt });
+        store.set(key, { value: set, expiresAt: expiry });
         evictIfNeeded();
       }
       let added = 0;

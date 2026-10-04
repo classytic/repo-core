@@ -74,7 +74,7 @@ import {
   isNull,
   lt,
   lte,
-  ne,
+  nin,
   not,
   or,
   regex,
@@ -125,8 +125,16 @@ function buildIn(field: string, members: readonly unknown[]): Filter {
   return branches.length === 1 ? (branches[0] as Filter) : or(...branches);
 }
 
-/** `$nin` is the negation of `$in` — none of the members may match. */
+/**
+ * `$nin` is the negation of `$in` — none of the members may match. With a `null` member and only
+ * scalars it is exactly the IR's strict `nin` (null and missing excluded), so it maps to that
+ * directly and compiles back to one `$nin` instead of a `$nor` of an `$or`.
+ */
 function buildNin(field: string, members: readonly unknown[]): Filter {
+  const scalars = members.filter((m) => m !== null && m !== undefined);
+  if (scalars.length < members.length && !scalars.some((m) => m instanceof RegExp)) {
+    return scalars.length === 0 ? isNotNull(field) : nin(field, scalars);
+  }
   const inFilter = buildIn(field, members);
   // `$nin: []` matches everything (negation of "matches nothing").
   return inFilter.op === 'false' ? TRUE : not(inFilter);
@@ -147,8 +155,10 @@ function fieldFilter(field: string, condition: unknown): Filter {
       case '$eq':
         parts.push(operand === null ? isNull(field) : eq(field, operand));
         break;
+      // Mongo `$ne` matches a missing/null field; the IR `ne` (SQL 3VL) does not. Negating `eq`
+      // keeps the record's Mongo meaning in every evaluator — as `$nin` negates `$in`.
       case '$ne':
-        parts.push(operand === null ? isNotNull(field) : ne(field, operand));
+        parts.push(operand === null ? isNotNull(field) : not(eq(field, operand)));
         break;
       case '$gt':
         parts.push(gt(field, operand as never));

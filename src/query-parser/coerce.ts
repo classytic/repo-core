@@ -1,96 +1,71 @@
 /**
- * Scalar coercion. URLs are strings; filters compare against typed fields.
- * The parser uses `fieldTypes` hints when provided, otherwise a safe
- * heuristic that avoids the classic footguns (string SKUs becoming
- * numbers, numeric-looking strings becoming Dates).
+ * URL value → typed scalar. A declared field type wins, and a value that does not fit it is
+ * refused. Without one, a conservative heuristic applies: never a leading-zero code (`007`), never a
+ * digit string long enough to be an id or to lose precision, and a date only for a RANGE operand —
+ * `?code=2026-01-01` is a string far more often than a date.
  */
 
 import { ISO_DATE_PATTERN } from '../filter/coerce-dates.js';
-import type { QueryParserOptions } from './types.js';
+import { QueryGrammarError } from './errors.js';
 
-const BOOLEAN_STRINGS = new Set(['true', '1', 'yes', 'on']);
-const FALSEY_STRINGS = new Set(['false', '0', 'no', 'off']);
-// Tight ISO-8601 — catches 2026-04-19, 2026-04-19T10:00:00Z, millisecond
-// precision. Single source of truth lives in `filter/coerce-dates.ts`, which
-// the aggregation/`$match` coercion path also uses — one pattern, so the URL
-// boundary and the compile boundary can never disagree on what "looks like a
-// date".
-const ISO_DATE_RE = ISO_DATE_PATTERN;
+/** Field types a caller (or a kit, from its schema) can declare for exact coercion. */
+export type QueryFieldType = 'string' | 'number' | 'boolean' | 'date';
 
-/**
- * Coerce a single URL value to its field-declared type, or to a best-guess
- * scalar when no hint exists. Always returns `string`, `number`, `boolean`,
- * `Date`, or `null` — never `undefined`.
- */
-export function coerceValue(
-  rawValue: string,
-  fieldType: QueryParserOptions['fieldTypes'] extends infer T
-    ? T extends Record<string, infer V>
-      ? V | undefined
-      : undefined
-    : undefined,
-): unknown {
-  if (rawValue === 'null') return null;
+/** What a URL value coerces to. */
+export type QueryScalar = string | number | boolean | Date | null;
+
+const HEURISTIC_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const MAX_HEURISTIC_NUMBER_LENGTH = 15;
+const STRICT_NUMBER = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+
+export interface CoerceOptions {
+  /** The field's declared type, when known. */
+  fieldType?: QueryFieldType | undefined;
+  /** True for a range operand (`gt`/`gte`/`lt`/`lte`/`between`) — enables date detection. */
+  range?: boolean;
+  /** The parameter, for the error message. */
+  param: string;
+}
+
+export function coerceQueryValue(raw: string, options: CoerceOptions): QueryScalar {
+  if (raw === 'null') return null;
+  const { fieldType, param } = options;
 
   switch (fieldType) {
-    case 'number': {
-      const n = Number(rawValue);
-      return Number.isFinite(n) ? n : rawValue;
-    }
-    case 'boolean':
-      return BOOLEAN_STRINGS.has(rawValue.toLowerCase());
-    case 'date': {
-      const d = new Date(rawValue);
-      return Number.isNaN(d.getTime()) ? rawValue : d;
-    }
     case 'string':
-      return rawValue;
-    default:
-      return heuristicCoerce(rawValue);
+      return raw;
+    case 'number': {
+      if (!STRICT_NUMBER.test(raw)) throw new QueryGrammarError(param, `"${raw}" is not a number`);
+      return Number(raw);
+    }
+    case 'boolean': {
+      const lower = raw.toLowerCase();
+      if (lower === 'true' || lower === '1') return true;
+      if (lower === 'false' || lower === '0') return false;
+      throw new QueryGrammarError(param, `"${raw}" is not a boolean (true/false)`);
+    }
+    case 'date':
+      return toDate(raw) ?? fail(param, `"${raw}" is not an ISO-8601 date`);
   }
+
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (options.range) {
+    const date = toDate(raw);
+    if (date) return date;
+    // A range bound is a magnitude, never an id — any finite number shape is numeric.
+    if (STRICT_NUMBER.test(raw) && Number.isFinite(Number(raw))) return Number(raw);
+  }
+  if (raw.length <= MAX_HEURISTIC_NUMBER_LENGTH && HEURISTIC_NUMBER.test(raw)) return Number(raw);
+  return raw;
 }
 
-/**
- * Heuristic used when no field-type hint applies. Deliberately conservative:
- *
- * - Pure boolean strings ("true", "false") → boolean.
- * - Unambiguous ISO-8601 dates → Date.
- * - Integers that don't start with 0 (unless literal "0") → number.
- * - Floats → number.
- * - Anything else stays a string.
- *
- * We do NOT coerce arbitrary-looking numeric strings ("12345") because
- * they're routinely SKUs, order IDs, or phone numbers. Callers needing
- * reliable numeric coercion pass `fieldTypes: { age: 'number' }`.
- */
-function heuristicCoerce(value: string): unknown {
-  if (BOOLEAN_STRINGS.has(value) && value.length <= 5) {
-    // only "true" / "1" / "yes" / "on" qualify; "yes" as a name is rare.
-    if (value === 'true' || value === 'false') return value === 'true';
-  }
-  if (FALSEY_STRINGS.has(value) && (value === 'false' || value === 'true')) {
-    return value === 'true';
-  }
-  if (ISO_DATE_RE.test(value)) {
-    const d = new Date(value);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
-  // Float pattern — require a dot to avoid coercing integer-like SKUs.
-  if (/^-?\d+\.\d+$/.test(value)) {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
-  }
-  return value;
+function toDate(raw: string): Date | undefined {
+  if (!ISO_DATE_PATTERN.test(raw)) return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-/**
- * Split a comma-separated URL value into an array of coerced scalars.
- * Used by `in`/`nin`/`between` which accept `field[in]=a,b,c`.
- */
-export function coerceList(
-  rawValue: string,
-  fieldType: Parameters<typeof coerceValue>[1],
-): unknown[] {
-  if (rawValue.length === 0) return [];
-  return rawValue.split(',').map((v) => coerceValue(v.trim(), fieldType));
+function fail(param: string, reason: string): never {
+  throw new QueryGrammarError(param, reason);
 }

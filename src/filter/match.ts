@@ -16,7 +16,8 @@
  * - Comparators use JavaScript's strict `<`/`>`/`===`. `Date` instances
  *   compare by `getTime()` (so two `Date` values with the same instant
  *   are `eq`).
- * - `in` / `nin` use SameValueZero equality (`Array.prototype.includes`).
+ * - `in` / `nin` use SameValueZero equality (`Array.prototype.includes`); `ne` / `nin` never
+ *   match a null or missing value (SQL three-valued logic, as every kit compiles them).
  * - `like` interprets `%` as `.*` and `_` as `.` — matching SQL `LIKE`.
  * - Regex dialect is JavaScript's RegExp; kits targeting different
  *   dialects compile to their native matcher instead of using this.
@@ -44,10 +45,18 @@ export function matchFilter(doc: unknown, filter: Filter): boolean {
     // path with no array yields a single value, so scalar behavior is
     // unchanged. All array unwrapping lives in `someValue`; the
     // predicates (`equals`/`compare`/regex) stay pure scalar.
+    // `eq null` is IS NULL: a null OR missing value, as every kit compiles it.
+    // `eq null` is IS NULL — a null OR missing value, as every kit compiles it.
     case 'eq':
+      if (filter.value === null) return !fieldPresent(doc, filter.field);
       return someValue(resolve(doc, filter.field), (v) => equals(v, filter.value));
+    // `ne` / `nin` follow SQL three-valued logic, as every kit's compiler does: a null or missing
+    // value is never "not equal" to anything.
     case 'ne':
-      return !someValue(resolve(doc, filter.field), (v) => equals(v, filter.value));
+      return (
+        fieldPresent(doc, filter.field) &&
+        !someValue(resolve(doc, filter.field), (v) => equals(v, filter.value))
+      );
     case 'gt':
       return someValue(resolve(doc, filter.field), (v) => compare(v, filter.value) > 0);
     case 'gte':
@@ -56,13 +65,18 @@ export function matchFilter(doc: unknown, filter: Filter): boolean {
       return someValue(resolve(doc, filter.field), (v) => compare(v, filter.value) < 0);
     case 'lte':
       return someValue(resolve(doc, filter.field), (v) => compare(v, filter.value) <= 0);
+    // A `null` member is IS NULL — null or missing — exactly as `eq null` is.
     case 'in': {
+      if (filter.values.includes(null) && !fieldPresent(doc, filter.field)) return true;
       const vs = resolve(doc, filter.field);
       return someValue(vs, (v) => filter.values.some((candidate) => equals(v, candidate)));
     }
     case 'nin': {
       const vs = resolve(doc, filter.field);
-      return !someValue(vs, (v) => filter.values.some((candidate) => equals(v, candidate)));
+      return (
+        fieldPresent(doc, filter.field) &&
+        !someValue(vs, (v) => filter.values.some((candidate) => equals(v, candidate)))
+      );
     }
     case 'exists': {
       const present = fieldPresent(doc, filter.field);
@@ -294,10 +308,17 @@ function regexTest(re: RegExp, v: unknown): boolean {
   return typeof v === 'string' && v.length <= MAX_REGEX_INPUT && re.test(v);
 }
 
-/** SQL `LIKE` pattern → JS regex body. Escapes regex metachars; `%` → `.*`, `_` → `.`. */
+/** SQL `LIKE` → regex body: `%` → `.*`, `_` → `.`, and the `\` escape (`\%`, `\_`, `\\`) as every kit compiles it. */
 function likeToRegex(pattern: string): string {
   let out = '';
-  for (const ch of pattern) {
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i] as string;
+    const next = pattern[i + 1];
+    if (ch === '\\' && (next === '%' || next === '_' || next === '\\')) {
+      out += next === '\\' ? '\\\\' : next;
+      i++;
+      continue;
+    }
     if (ch === '%') {
       out += '.*';
     } else if (ch === '_') {

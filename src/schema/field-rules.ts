@@ -233,18 +233,79 @@ export function mergeFieldRuleConstraints(
       const prop = properties[field];
       if (!prop || typeof prop !== 'object') continue;
 
-      if (rule.minLength != null && prop['minLength'] == null) prop['minLength'] = rule.minLength;
-      if (rule.maxLength != null && prop['maxLength'] == null) prop['maxLength'] = rule.maxLength;
-      if (rule.min != null && prop['minimum'] == null) prop['minimum'] = rule.min;
-      if (rule.max != null && prop['maximum'] == null) prop['maximum'] = rule.max;
-      if (rule.pattern != null && prop['pattern'] == null) prop['pattern'] = rule.pattern;
-      if (rule.enum != null && prop['enum'] == null) prop['enum'] = rule.enum as unknown[];
+      // Value constraints describe a VALUE. On an array field that is each
+      // ELEMENT — see `elementSchemas` for why this cannot go on the property.
+      for (const target of elementSchemas(prop)) {
+        if (rule.minLength != null && target['minLength'] == null)
+          target['minLength'] = rule.minLength;
+        if (rule.maxLength != null && target['maxLength'] == null)
+          target['maxLength'] = rule.maxLength;
+        if (rule.min != null && target['minimum'] == null) target['minimum'] = rule.min;
+        if (rule.max != null && target['maximum'] == null) target['maximum'] = rule.max;
+        if (rule.pattern != null && target['pattern'] == null) target['pattern'] = rule.pattern;
+        if (rule.enum != null && target['enum'] == null) target['enum'] = rule.enum as unknown[];
+      }
+
+      // These describe the FIELD itself, array or not: its documentation, and
+      // whether the whole value may be `null`.
       if (rule.description != null && prop['description'] == null) {
         prop['description'] = rule.description as string;
       }
       if (rule.nullable === true) applyNullable(prop);
     }
   }
+}
+
+/** Is this property typed as an array — `'array'` or a tuple that includes it? */
+function isArrayTyped(prop: AnyObj): boolean {
+  const type = prop['type'];
+  return type === 'array' || (Array.isArray(type) && type.includes('array'));
+}
+
+/**
+ * Where a VALUE constraint (`enum`, `pattern`, `minLength`, …) belongs.
+ *
+ * On a scalar property: the property. On an array property: every ELEMENT
+ * schema, never the array.
+ *
+ * Writing them onto the array is not merely redundant, it is wrong in two
+ * different directions depending on the keyword, and neither one throws:
+ *
+ * - `enum` on an array compares the WHOLE array to each member, which a list
+ *   of strings can never equal — so every write is refused, including one that
+ *   omits the field, and the error names a field the caller did not send.
+ * - `pattern`, `minLength`, `maxLength`, `minimum`, `maximum` are string /
+ *   number keywords, and JSON Schema ignores them on an array — so the rule
+ *   validates NOTHING while reading as enforced.
+ *
+ * `min`/`max` therefore bound each element's value, not the item count. That
+ * keeps one meaning per keyword; reinterpreting them as `minItems` on arrays
+ * only would make a rule's meaning depend on a type the author never wrote.
+ *
+ * A property with no `items` gets one, so the constraint is never dropped. A
+ * tuple-form `items` (an array of schemas) constrains every position.
+ */
+function elementSchemas(prop: AnyObj): AnyObj[] {
+  // `anyOf` wrapping (nullable arrays are emitted this way by some kits):
+  // constrain the element schema of every array branch.
+  if (Array.isArray(prop['anyOf'])) {
+    const branches = (prop['anyOf'] as unknown[]).filter(
+      (b): b is AnyObj => b !== null && typeof b === 'object' && isArrayTyped(b as AnyObj),
+    );
+    if (branches.length > 0) return branches.flatMap((b) => elementSchemas(b));
+  }
+
+  if (!isArrayTyped(prop)) return [prop];
+
+  const items = prop['items'];
+  if (Array.isArray(items)) {
+    return items.filter((s): s is AnyObj => s !== null && typeof s === 'object');
+  }
+  if (items && typeof items === 'object') return [items as AnyObj];
+
+  const created: AnyObj = {};
+  prop['items'] = created;
+  return [created];
 }
 
 /**

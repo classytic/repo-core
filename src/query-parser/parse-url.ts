@@ -1,375 +1,121 @@
 /**
- * URL → ParsedQuery<Filter> parser.
+ * URL → {@link ParsedQuery} with a portable Filter IR. The grammar (keys, operators, coercion,
+ * paging) is `./grammar.ts`'s; this adds only the IR emission and the populate spec.
  *
- * Takes a URLSearchParams-shaped input and produces a driver-agnostic
- * ParsedQuery. The grammar is SQL-ish bracket syntax:
- *
- *   ?status=active                     → eq('status', 'active')
- *   ?age[gte]=18&age[lt]=65            → and(gte(age, 18), lt(age, 65))
- *   ?role[in]=admin,editor             → in_('role', ['admin', 'editor'])
- *   ?name[contains]=john               → contains('name', 'john')
- *   ?search=hello&sort=-createdAt      → ParsedQuery with `.search` + sort
- *   ?price[between]=10,100             → between('price', 10, 100)
- *   ?deletedAt[exists]=false           → isNull('deletedAt')
- *
- * Reserved keys (never parsed as filters) — see `./reserved.ts`:
- *   - `page`, `limit`, `after`, `sort`, `select`, `populate`, `search`
- *   - any `_*` key (framework dispatch namespace: `_count`, `_distinct`,
- *     `_exists`, ...)
- *
- * Kits never reimplement this — they import and use it as-is. Arc-next
- * and fluid can also import this to unit-test their URL emission.
+ *   ?status=active&age[gte]=18          → and(eq(status), gte(age, 18))
+ *   ?role[in]=admin,editor              → in_(role, [...])
+ *   ?name[contains]=john&sort=-createdAt → contains(name, 'john') + sort
  */
 
-import type { Filter } from '../filter/index.js';
+import { QueryGrammarError } from './errors.js';
 import {
-  and,
-  between,
-  contains,
-  endsWith,
-  eq,
-  gt,
-  gte,
-  iEq,
-  in_,
-  isNotNull,
-  isNull,
-  like,
-  lt,
-  lte,
-  ne,
-  nin,
-  regex,
-  startsWith,
-  TRUE,
-} from '../filter/index.js';
-import { coerceList, coerceValue } from './coerce.js';
-import { isControlParam } from './reserved.js';
-import type {
-  BracketOperator,
-  ParsedPopulate,
-  ParsedQuery,
-  ParsedSelect,
-  ParsedSort,
-  QueryParserInput,
-  QueryParserOptions,
-} from './types.js';
+  clausesToFilter,
+  DEFAULT_MAX_TEXT_LENGTH,
+  type QueryInput,
+  readFilterClauses,
+  readPageRequest,
+  readSearch,
+  readSelect,
+  readSort,
+  toRecord,
+} from './grammar.js';
+import type { ParsedPopulate, ParsedQuery, QueryParserInput, QueryParserOptions } from './types.js';
 
-const DEFAULT_LIMIT = 20;
-const DEFAULT_MAX_LIMIT = 200;
-const DEFAULT_MAX_DEPTH = 10;
-const DEFAULT_MAX_REGEX = 500;
-const DEFAULT_MAX_SEARCH = 200;
-/**
- * Hard cap on URL parameter KEY length. Param keys land in regex-based
- * bracket parsing (`/^([^[\]]+)\[([^\]]+)\]$/` and friends); without a
- * length bound, a hostile caller can submit a 1MB key and force the
- * parser to scan the entire string for every regex try. Keys that
- * exceed this cap are silently skipped — legitimate URL params don't
- * approach this bound.
- */
-const MAX_PARAM_KEY_LENGTH = 256;
+const FIELD_RE = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$/;
 
-const ALL_OPERATORS: ReadonlySet<BracketOperator> = new Set([
-  'eq',
-  'ne',
-  'gt',
-  'gte',
-  'lt',
-  'lte',
-  'in',
-  'nin',
-  'like',
-  'contains',
-  'startsWith',
-  'endsWith',
-  'ieq',
-  'regex',
-  'between',
-  'exists',
-]);
-
-/** Parse URL search params into a driver-agnostic ParsedQuery. */
+/** Parse URL search params into a driver-agnostic ParsedQuery. Invalid input throws a 400. */
 export function parseUrl(input: QueryParserInput, options: QueryParserOptions = {}): ParsedQuery {
-  const params = normalize(input);
-  const maxLimit = options.maxLimit ?? DEFAULT_MAX_LIMIT;
-  const allowedOps = options.allowedOperators ? new Set(options.allowedOperators) : ALL_OPERATORS;
-
-  // ── Pagination + list-level params ───────────────────────────────────
-  const rawPage = params.get('page');
-  const rawLimit = params.get('limit');
-  const after = params.get('after') ?? undefined;
-  const limit = clampLimit(rawLimit, options.defaultLimit ?? DEFAULT_LIMIT, maxLimit);
-  const page = rawPage !== null && rawPage !== undefined ? toPositiveInt(rawPage) : undefined;
-
-  // ── Sort ─────────────────────────────────────────────────────────────
-  const sort = parseSort(params.get('sort'), options.allowedSortFields);
-
-  // ── Select ───────────────────────────────────────────────────────────
-  const select = parseSelect(params.get('select'));
-
-  // ── Populate ─────────────────────────────────────────────────────────
-  const populate = parsePopulate(params);
-
-  // ── Search ───────────────────────────────────────────────────────────
-  const rawSearch = params.get('search');
-  const searchCap = options.maxSearchLength ?? DEFAULT_MAX_SEARCH;
-  const search =
-    rawSearch !== null && rawSearch !== undefined && rawSearch.length > 0
-      ? rawSearch.slice(0, searchCap)
-      : undefined;
-
-  // ── Filters ──────────────────────────────────────────────────────────
-  const filter = parseFilters(params, {
-    allowedFields: options.allowedFilterFields,
-    allowedOps,
+  const record = toRecord(input as QueryInput);
+  const pageRequest = readPageRequest(
+    { page: first(record['page']), limit: first(record['limit']), after: first(record['after']) },
+    { defaultLimit: options.defaultLimit, maxLimit: options.maxLimit },
+  );
+  const { clauses } = readFilterClauses(record, {
+    allowedFilterFields: options.allowedFilterFields,
+    allowedOperators: options.allowedOperators,
     fieldTypes: options.fieldTypes,
-    maxDepth: options.maxFilterDepth ?? DEFAULT_MAX_DEPTH,
-    maxRegex: options.maxRegexLength ?? DEFAULT_MAX_REGEX,
+    maxTextLength: options.maxRegexLength ?? DEFAULT_MAX_TEXT_LENGTH,
   });
 
-  const result: ParsedQuery = { filter, limit };
+  const result: ParsedQuery = { filter: clausesToFilter(clauses), limit: pageRequest.limit };
+  const sort = readSort(record['sort'], { allowedSortFields: options.allowedSortFields });
   if (sort) result.sort = sort;
+  const select = readSelect(record['select']);
   if (select) result.select = select;
+  const populate = readPopulate(record);
   if (populate.length > 0) result.populate = populate;
-  if (page !== undefined) result.page = page;
-  if (after !== undefined) result.after = after;
+  if (pageRequest.page !== undefined) result.page = pageRequest.page;
+  if (pageRequest.after !== undefined) result.after = pageRequest.after;
+  const search = readSearch(first(record['search']), { maxSearchLength: options.maxSearchLength });
   if (search !== undefined) result.search = search;
   return result;
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Internals
-// ──────────────────────────────────────────────────────────────────────
-
-interface FilterParseContext {
-  allowedFields: readonly string[] | undefined;
-  allowedOps: ReadonlySet<BracketOperator>;
-  fieldTypes: QueryParserOptions['fieldTypes'];
-  maxDepth: number;
-  maxRegex: number;
-}
-
-interface NormalizedParams {
-  get(key: string): string | null;
-  /** Iterates every param, returning both single values and array-split ones. */
-  entries(): Iterable<[string, string]>;
-  /** True if the key was provided (even with empty string). */
-  has(key: string): boolean;
-}
-
-function normalize(input: QueryParserInput): NormalizedParams {
-  if (input instanceof URLSearchParams) {
-    return {
-      get: (k) => input.get(k),
-      entries: () => input.entries(),
-      has: (k) => input.has(k),
-    };
-  }
-  if (Symbol.iterator in (input as object)) {
-    const usp = new URLSearchParams();
-    for (const [k, v] of input as Iterable<[string, string]>) usp.append(k, v);
-    return {
-      get: (k) => usp.get(k),
-      entries: () => usp.entries(),
-      has: (k) => usp.has(k),
-    };
-  }
-  const record = input as Record<string, string | string[] | undefined>;
-  const usp = new URLSearchParams();
-  for (const [k, v] of Object.entries(record)) {
-    if (v === undefined) continue;
-    if (Array.isArray(v)) for (const item of v) usp.append(k, item);
-    else usp.append(k, v);
-  }
-  return {
-    get: (k) => usp.get(k),
-    entries: () => usp.entries(),
-    has: (k) => usp.has(k),
-  };
-}
-
-function clampLimit(raw: string | null, fallback: number, max: number): number {
-  if (raw === null || raw === undefined) return fallback;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return fallback;
-  return Math.min(Math.floor(n), max);
-}
-
-function toPositiveInt(raw: string): number | undefined {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return undefined;
-  return Math.floor(n);
-}
-
-function parseSort(raw: string | null, allowed?: readonly string[]): ParsedSort | undefined {
-  if (!raw) return undefined;
-  const spec: ParsedSort = {};
-  for (const piece of raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)) {
-    const desc = piece.startsWith('-');
-    const field = desc ? piece.slice(1) : piece.startsWith('+') ? piece.slice(1) : piece;
-    if (allowed && !allowed.includes(field)) continue;
-    spec[field] = desc ? -1 : 1;
-  }
-  return Object.keys(spec).length > 0 ? spec : undefined;
-}
-
-function parseSelect(raw: string | null): ParsedSelect | undefined {
-  if (!raw) return undefined;
-  const spec: ParsedSelect = {};
-  for (const piece of raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)) {
-    if (piece.startsWith('-')) {
-      spec[piece.slice(1)] = 0;
-    } else {
-      spec[piece] = 1;
-    }
-  }
-  return Object.keys(spec).length > 0 ? spec : undefined;
+/** A repeated control param (`?limit=5&limit=9`) is ambiguous — refused rather than guessed. */
+function first(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  if (value.length > 1) throw new QueryGrammarError('query', 'a control parameter is repeated');
+  return value[0];
 }
 
 /**
- * Parse `populate[field][select]=...&populate[field][match][other]=...` into
- * an array of ParsedPopulate specs. Flat iteration keeps the parser simple;
- * nested populate (`populate[author][populate][org][select]=...`) is supported
- * one level deep.
+ * `populate[path][select]=a,b` and `populate[path][match][field]=value` (field equality only —
+ * a `$` key or a nested condition is refused, never passed to the kit).
  */
-function parsePopulate(params: NormalizedParams): ParsedPopulate[] {
-  // Collect keys that start with `populate[...]`
-  const byField: Map<string, { select?: string; match?: Record<string, unknown> }> = new Map();
-  for (const [key, value] of params.entries()) {
-    if (key.length > MAX_PARAM_KEY_LENGTH) continue;
-    if (!key.startsWith('populate[')) continue;
-    const match = /^populate\[([^\]]+)\](?:\[([^\]]+)\](?:\[([^\]]+)\])?)?$/.exec(key);
-    if (!match) continue;
-    const [, field, sub, subKey] = match;
-    if (!field) continue;
-    const existing = byField.get(field) ?? {};
-    if (!sub) {
-      // populate[author] with a value — unused in this flat form; ignore.
-      byField.set(field, existing);
-    } else if (sub === 'select') {
-      existing.select = value;
-      byField.set(field, existing);
-    } else if (sub === 'match' && subKey) {
-      existing.match = existing.match ?? {};
-      existing.match[subKey] = value;
-      byField.set(field, existing);
+function readPopulate(record: Record<string, unknown>): ParsedPopulate[] {
+  const byPath = new Map<string, ParsedPopulate>();
+  const entry = (path: string): ParsedPopulate => {
+    if (!FIELD_RE.test(path))
+      throw new QueryGrammarError(`populate[${path}]`, 'not a field path', 'syntax');
+    const existing = byPath.get(path) ?? { path };
+    byPath.set(path, existing);
+    return existing;
+  };
+
+  for (const [key, value] of Object.entries(record)) {
+    if (
+      key === 'populate' &&
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value)
+    ) {
+      for (const [path, spec] of Object.entries(value as Record<string, unknown>)) {
+        const target = entry(path);
+        if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) continue;
+        const { select, match } = spec as { select?: unknown; match?: unknown };
+        if (typeof select === 'string') target.select = select;
+        if (match !== undefined) target.match = readMatch(path, match);
+      }
+      continue;
+    }
+    const flat = /^populate\[([^\]]+)\](?:\[(select|match)\](?:\[([^\]]+)\])?)?$/.exec(key);
+    if (!flat) continue;
+    const [, path, sub, matchField] = flat as unknown as [string, string, string?, string?];
+    const target = entry(path);
+    if (sub === 'select') target.select = String(value);
+    if (sub === 'match' && matchField) {
+      target.match = { ...target.match, ...readMatch(path, { [matchField]: value }) };
     }
   }
-  const out: ParsedPopulate[] = [];
-  for (const [path, spec] of byField) {
-    const entry: ParsedPopulate = { path };
-    if (spec.select !== undefined) entry.select = spec.select;
-    if (spec.match) entry.match = spec.match;
-    out.push(entry);
-  }
-  return out;
+  return [...byPath.values()];
 }
 
-function parseFilters(params: NormalizedParams, ctx: FilterParseContext): Filter {
-  const leaves: Filter[] = [];
-  // Collate `field[op]=v` entries into groups keyed by field, so
-  // multiple predicates on the same field become one AND.
-  const fieldGroups: Map<string, Filter[]> = new Map();
-
-  for (const [key, rawValue] of params.entries()) {
-    if (key.length > MAX_PARAM_KEY_LENGTH) continue;
-    if (isControlParam(key) || key.startsWith('populate[')) continue;
-
-    const bracket = /^([^[\]]+)\[([^\]]+)\]$/.exec(key);
-    let field: string;
-    let op: BracketOperator;
-    if (bracket) {
-      const [, f, o] = bracket;
-      if (!f || !o) continue;
-      field = f;
-      op = o as BracketOperator;
-    } else {
-      field = key;
-      op = 'eq';
-    }
-    if (ctx.allowedFields && !ctx.allowedFields.includes(field)) continue;
-    if (!ctx.allowedOps.has(op)) continue;
-
-    const fieldType = ctx.fieldTypes?.[field];
-    const leaf = buildLeaf(field, op, rawValue, fieldType, ctx);
-    if (!leaf) continue;
-
-    const bucket = fieldGroups.get(field) ?? [];
-    bucket.push(leaf);
-    fieldGroups.set(field, bucket);
+function readMatch(path: string, match: unknown): Record<string, unknown> {
+  if (match === null || typeof match !== 'object' || Array.isArray(match)) {
+    throw new QueryGrammarError(
+      `populate[${path}][match]`,
+      'use populate[path][match][field]=value',
+      'syntax',
+    );
   }
-
-  for (const [, nodes] of fieldGroups) {
-    if (nodes.length === 1) {
-      leaves.push(nodes[0] as Filter);
-    } else {
-      leaves.push(and(...nodes));
+  for (const [field, value] of Object.entries(match as Record<string, unknown>)) {
+    if (!FIELD_RE.test(field) || (value !== null && typeof value === 'object')) {
+      throw new QueryGrammarError(
+        `populate[${path}][match]`,
+        `field equality only: "${field}"`,
+        'syntax',
+      );
     }
   }
-
-  if (leaves.length === 0) return TRUE;
-  if (leaves.length === 1) return leaves[0] as Filter;
-  return and(...leaves);
-}
-
-function buildLeaf(
-  field: string,
-  op: BracketOperator,
-  rawValue: string,
-  fieldType: FilterParseContext['fieldTypes'] extends infer T
-    ? T extends Record<string, infer V>
-      ? V | undefined
-      : undefined
-    : undefined,
-  ctx: FilterParseContext,
-): Filter | undefined {
-  switch (op) {
-    case 'eq':
-      return eq(field, coerceValue(rawValue, fieldType));
-    case 'ne':
-      return ne(field, coerceValue(rawValue, fieldType));
-    case 'gt':
-      return gt(field, coerceValue(rawValue, fieldType));
-    case 'gte':
-      return gte(field, coerceValue(rawValue, fieldType));
-    case 'lt':
-      return lt(field, coerceValue(rawValue, fieldType));
-    case 'lte':
-      return lte(field, coerceValue(rawValue, fieldType));
-    case 'in':
-      return in_(field, coerceList(rawValue, fieldType));
-    case 'nin':
-      return nin(field, coerceList(rawValue, fieldType));
-    case 'like':
-      return like(field, rawValue);
-    case 'contains':
-      return contains(field, rawValue);
-    case 'startsWith':
-      return startsWith(field, rawValue);
-    case 'endsWith':
-      return endsWith(field, rawValue);
-    case 'ieq':
-      return iEq(field, rawValue);
-    case 'regex': {
-      if (rawValue.length > ctx.maxRegex) return undefined;
-      return regex(field, rawValue);
-    }
-    case 'between': {
-      const parts = coerceList(rawValue, fieldType);
-      if (parts.length < 2) return undefined;
-      return between(field, parts[0], parts[1]);
-    }
-    case 'exists': {
-      const val = rawValue.toLowerCase();
-      const present = val === 'true' || val === '1';
-      return present ? isNotNull(field) : isNull(field);
-    }
-  }
+  return match as Record<string, unknown>;
 }

@@ -4,6 +4,171 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-09-23
+
+### ⚠ Changed — ONE list-query grammar, held to by every parser (`./query-parser`)
+
+The URL grammar is now an explicit contract in repo-core, and arc's `ArcQueryParser` and
+mongokit's `QueryParser` read requests through it, so a query means the same thing everywhere.
+Before, the three parsers disagreed on 32 of 43 probed query strings. A few disagreements were
+security holes (`$where` passing through `parseUrl`, malformed keys dropped), and some silently
+returned wrong rows (date ranges compared as strings, `007` read as `7`).
+
+- **`readFilterClauses` / `clausesToFilter`**: keys are `field` or `field[op]` (a dot path).
+  Operators are closed: `eq ne gt gte lt lte in nin exists contains startsWith endsWith ieq
+  regex`, plus `like` (= `contains`), `between=a,b` and `options` (regex flags). A kit adds its
+  own via `extensionOperators`.
+  - Text operators match LITERAL text case-insensitively; only `regex` is a pattern, and an unsafe
+    one is refused.
+  - `ne` / `nin` / `exists` follow the IR: null and missing never match a value.
+  - Membership is a union: `status=a&status=b`, repeated `[in]` and `eq`+`in` become one `in`.
+  - An empty value is no filter.
+- **`coerceQueryValue`** replaces `coerceValue` / `coerceList`. A declared type is exact, and a
+  value that doesn't fit is refused. Without one: `null`, `true`/`false`, safe numbers without
+  leading zeros (15 chars max for equality, any length for a range bound), and ISO dates for
+  range operands only.
+- **`readPageRequest` / `readSort` / `readSelect` / `readSearch`**:
+  - `limit` and `page` are positive integers; a limit over the cap is clamped.
+  - An invalid or disallowed sort/select field is refused, and an over-long search is refused,
+    never truncated. Sort/select accept commas or Mongoose's spaces.
+- **`QueryGrammarError`** (400, `INVALID_QUERY_INPUT`, `validationErrors[0].path`) carries a
+  `kind` of `syntax` | `policy` | `value`, so a lenient parser can relax allowlists without
+  tolerating smuggled operators. `onInvalid` is drop mode, and structural refusals reach it too.
+- **`parseUrl`** is rebuilt on the grammar: allowlists refuse rather than drop, populate `match`
+  is field equality only, and `maxFilterDepth` is removed (the flat grammar has no nesting to
+  bound). The default `maxLimit` is 1000, matching arc and mongokit.
+- **`filter`** is a reserved param (the envelope).
+
+### Added — `runQueryGrammarConformance` (`./testing`)
+
+A semantic suite: one fixture (nulls, missing fields, codes, dates, `.` and `%` in text) and
+every case must select the same rows or be refused with a 400. arc and mongokit run it, mongokit
+also against a real MongoDB, and sqlitekit against a real SQLite. A new parser passes by agreeing
+on RESULTS. `unsupportedOperators` lets a backend that cannot run an operator (SQLite without
+REGEXP) be held to REFUSING it with a 400 instead.
+
+### Fixed — the in-memory matcher disagreed with every kit's compiler
+
+- `matchFilter`: `ne` / `nin` now exclude null and missing (SQL three-valued logic, pinned by
+  `runStandardRepoConformance`), and `eq null` matches missing as well as null. Before, an
+  in-memory policy check could admit a row the same filter excluded in the database. `in` with a
+  `null` member likewise matches a missing field (IS NULL), as Mongo and SQL do.
+- `matchFilter`'s LIKE now honours the `\` escape every kit uses, so `contains('note', '50%')`
+  matches the literal `%`. `escapeLikePattern` escapes `\` itself.
+- `policyRecordToFilter` keeps the Mongo record dialect's own meaning: `$ne: v` becomes
+  `not(eq)` (a missing field matches, as in Mongo). A `$nin` listing `null` becomes the strict
+  IR `nin`, which compiles back to a single `$nin`.
+
+
+### Added — the wire error-code catalog (`./errors`)
+
+`ARC_ERROR_CODES` and `ARC_REASON_CODES` join `ERROR_CODES` in `src/errors/codes.ts`: every code
+arc puts on `ErrorContract.code`, owned by the contract package so a client SDK reads the wire
+vocabulary without depending on the server. Arc emits from these constants and its test suite
+fails on an uncatalogued `arc.*` literal. `DUPLICATE_KEY_DETAIL_CODE` names the `details[].code`
+`toErrorContract` already emitted. `ERROR_CODES` moved out of `types.ts` (same export path).
+
+### Added — `assessRegex` / `escapeRegex` (`./query-parser`): the one ReDoS analyser
+
+Structural, not a regex over the regex: the pattern is walked with a group stack, so a repeated
+group containing a VARIABLE repetition or an alternation — `(a+)+`, `(a*)*`, `(.*)*`, `(a|aa)+` —
+is refused however it is spelled, as are backreferences, more than 20 unbounded quantifiers, a
+complexity budget (more than 8 groups, more than 10 alternations, quantifiers × groups over 40)
+and invalid syntax. `(a{2})+` is allowed (a fixed count is unambiguous). `parseUrl` drops an
+unsafe `regex` leaf; mongokit's and arc's parsers now use it instead of their own heuristics,
+which both missed `(a*)*`.
+
+### Fixed — invalidation could be undone by timing
+
+- `createTtlMemo`: a load in flight when `invalidate()` ran wrote its superseded result back, and a
+  `get` after the invalidation could join that stale load. Slots now carry a generation, so an old
+  load writes where nothing reads.
+- `addToSet` kept a set's CREATION expiry (`NX`), so a tag index could expire while newer tagged
+  entries lived on and tag invalidation missed them. The contract is now `GT` — extend, never
+  shorten (Redis ≥ 7: `EXPIRE key ttl GT`) — and the GET/SET fallback refreshes a re-cached
+  entry's index too.
+
+Pinned in `tests/unit/cache/invalidation-races.test.ts`.
+
+### ⚠ Fixed — `stableStringify` / `contentHash` collided on dates and regexes
+
+Every `Date` serialised as `{}` (it has no enumerable keys), so two payloads differing only by a
+date had the SAME `contentHash` — contradicting its own contract — and every `RegExp` collided the
+same way in cache keys. It now has wire semantics: `toJSON` applied (a `Date` is its ISO string, an
+ObjectId its hex), `undefined` absent, a `RegExp` as `{"$regex","$options"}`, and keys ordered by
+code unit instead of `localeCompare`. `fingerprintRequest` already normalised its input and is
+unchanged. Digests of values holding dates, regexes or ObjectIds change once.
+
+### Fixed — single-flight could hand one scope's result to another
+
+`CacheEngine`'s in-flight map was keyed by cache-key alone while the STORE was resolved per scope
+(`adapter: () => requestScopedCache()`), so two concurrent reads of one key in different scopes
+coalesced and the second received the first's result. In-flight fetches are now partitioned by
+the resolved adapter, and a read with no store in scope (or bypassed) never joins another
+caller's fetch. Dedup within one scope is unchanged. Pinned in
+`tests/unit/cache/single-flight-scope.test.ts`.
+
+### Added — `@classytic/repo-core/idempotency`: run a command at most once per key
+
+The one claim contract for every layer, beside `./lock` for the same reason: the store
+contract is driver-free and every kit already depends on this package. Kernels, spine modules,
+arc and hosts had kept at least four claims tables, each re-deriving the decision.
+
+- `runIdempotent({ store, identity, requestFingerprint, execute, … })` — claim → execute →
+  complete. Outcomes `executed | replayed | in_flight | exhausted`; the same key with a
+  different body throws `FINGERPRINT_MISMATCH`; a terminal failure replays as
+  `IdempotentReplayError`. `execute` gets `{ progress, context, checkpoint }` — recovery points
+  a takeover resumes from; `checkpoint(progress, { session })` commits one inside the side
+  effect's own transaction. `classifyFailure` → `terminal | transient | ambiguous` (ambiguous
+  keeps the claim and lapses its lease now). `maxAttempts` → `exhausted`. `storeOptions.session`
+  joins the caller's transaction.
+- `IdempotencyClaimStore` — `get`, `insert` (iff absent), `swap` / `release` (iff the in-flight
+  lease matches), `listLapsed` (for sweeps). `createMemoryIdempotencyStore()` is the reference.
+- `runIdempotencyStoreConformance` / `idempotencyStoreCases` (`./testing`) — every kit's store
+  runs it; its concurrency cases reject a read-then-write store.
+- `decideClaim`, `identityKey` (code-point ordered — never locale-sensitive), `fingerprintRequest`
+  (`contentHash` of the wire form; `undefined` dropped, `toJSON` honoured, refuses past 100 levels
+  with `UNFINGERPRINTABLE`).
+
+### Added — `KeysetPaginationResultCore.end`
+
+The cursor at a page's LAST row, minted whether or not more rows exist. Feed it back as
+`after` to resume later: a change feed that walked to its end (`next: null`) continues from
+`end` and reads only what changed since, instead of re-reading everything. Optional —
+absent means the kit does not mint it.
+
+### Fixed — `fieldRules` value constraints on ARRAY fields
+
+`mergeFieldRuleConstraints` wrote `enum`, `pattern`, `minLength`, `maxLength`,
+`min` and `max` onto the property regardless of its type. On an array property
+that is wrong in two directions, and neither one throws:
+
+- **`enum` refused every write.** It compares the WHOLE array to each member, and
+  a list of strings never equals a string. A body that omitted the field was
+  refused too, with an error naming a field the caller never sent. This made an
+  admin settings screen unable to save a single row.
+- **`pattern` / `minLength` / `maxLength` / `min` / `max` validated nothing.**
+  They are string and number keywords, and JSON Schema ignores them on an array —
+  so a rule read as enforced while checking nothing. A typed-in email address was
+  never validated at the API.
+
+Value constraints now land on the ELEMENT schema of an array (every position of a
+tuple `items`, every array branch of an `anyOf`), and an array with no `items`
+gets one so the constraint is never dropped. `description` and `nullable` still
+describe the field itself: a nullable array may be `null`, its elements may not.
+
+`min` / `max` bound each element's VALUE, not the item count — one meaning per
+keyword, rather than one that depends on a type the author never wrote.
+
+**Behaviour change for every kit** (mongokit, sqlitekit, pgkit, mysqlkit): array
+fields carrying a `pattern`/`minLength`/`maxLength`/`min`/`max` rule are now
+actually enforced, so a write that previously slipped through may be refused.
+That write was always invalid by the rule's own definition.
+
+This function had no tests. It now has 16, compiled against a validator rather
+than compared as shapes — a schema can look right and still accept what it
+exists to refuse.
+
 ## [0.28.0] - 2026-09-14
 
 ### Changed — BREAKING: `RetryPolicy.shouldRetry` no longer defaults to retrying everything

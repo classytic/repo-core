@@ -32,6 +32,8 @@ export const STANDARD_RESERVED_PARAMS: ReadonlySet<string> = new Set([
   'select',
   'populate',
   'search',
+  // The filter envelope (`filter[status]=active`) — unwrapped by the grammar, never a field.
+  'filter',
   // Resource-dispatch verbs (consumed by arc-style frameworks; kits
   // skip them at filter parse time)
   '_count',

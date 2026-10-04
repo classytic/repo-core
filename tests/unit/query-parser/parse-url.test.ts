@@ -3,6 +3,7 @@ import type { Filter } from '../../../src/filter/index.js';
 import {
   isControlParam,
   parseUrl,
+  QueryGrammarError,
   STANDARD_RESERVED_PARAMS,
 } from '../../../src/query-parser/index.js';
 
@@ -25,19 +26,20 @@ describe('parseUrl — basics', () => {
     expect(parse({ limit: '5000' }, { maxLimit: 100 }).limit).toBe(100);
   });
 
-  it('page is a positive integer or undefined', () => {
+  it('page is a positive integer; anything else is refused, never defaulted', () => {
     expect(parse({ page: '3' }).page).toBe(3);
-    expect(parse({ page: '0' }).page).toBeUndefined();
-    expect(parse({ page: 'abc' }).page).toBeUndefined();
+    expect(parse({}).page).toBeUndefined();
+    expect(() => parse({ page: '0' })).toThrow(QueryGrammarError);
+    expect(() => parse({ page: 'abc' })).toThrow(QueryGrammarError);
   });
 
   it('after cursor passes through opaquely', () => {
     expect(parse({ after: 'eyJ2Ij...' }).after).toBe('eyJ2Ij...');
   });
 
-  it('search is capped at maxSearchLength', () => {
-    const long = 'x'.repeat(500);
-    expect(parse({ search: long }).search?.length).toBe(200);
+  it('search longer than maxSearchLength is refused, never truncated', () => {
+    expect(() => parse({ search: 'x'.repeat(500) })).toThrow(QueryGrammarError);
+    expect(parse({ search: 'x'.repeat(200) }).search?.length).toBe(200);
   });
 });
 
@@ -46,10 +48,13 @@ describe('parseUrl — sort and select', () => {
     expect(parse({ sort: '-createdAt,+name' }).sort).toEqual({ createdAt: -1, name: 1 });
   });
 
-  it('sort respects allowedSortFields allowlist', () => {
-    expect(
-      parse({ sort: '-createdAt,-secret' }, { allowedSortFields: ['createdAt'] }).sort,
-    ).toEqual({ createdAt: -1 });
+  it('sort outside allowedSortFields is refused', () => {
+    expect(parse({ sort: '-createdAt' }, { allowedSortFields: ['createdAt'] }).sort).toEqual({
+      createdAt: -1,
+    });
+    expect(() =>
+      parse({ sort: '-createdAt,-secret' }, { allowedSortFields: ['createdAt'] }),
+    ).toThrow(QueryGrammarError);
   });
 
   it('select "name,-password" → {name:1, password:0}', () => {
@@ -115,24 +120,23 @@ describe('parseUrl — filters (bracket syntax)', () => {
     expect(filter).toEqual({ op: 'exists', field: 'deletedAt', exists: false });
   });
 
-  it('allowedFilterFields allowlist drops unknown fields', () => {
-    const { filter } = parse(
-      { status: 'active', secret: 'leaked' },
-      { allowedFilterFields: ['status'] },
+  // Dropping a filter WIDENS the read, so every allowlist refuses instead.
+  it('a field outside allowedFilterFields is refused', () => {
+    expect(() =>
+      parse({ status: 'active', secret: 'leaked' }, { allowedFilterFields: ['status'] }),
+    ).toThrow(QueryGrammarError);
+  });
+
+  it('an operator outside allowedOperators is refused', () => {
+    expect(() => parse({ 'age[regex]': '.*' }, { allowedOperators: ['eq', 'gt'] })).toThrow(
+      QueryGrammarError,
     );
-    // Only `status` made it in — `secret` was dropped.
-    expect(filter).toMatchObject({ op: 'eq', field: 'status', value: 'active' });
   });
 
-  it('allowedOperators closes the operator set', () => {
-    const { filter } = parse({ 'age[regex]': '.*' }, { allowedOperators: ['eq', 'gt'] });
-    expect(filter).toEqual({ op: 'true' }); // regex was dropped
-  });
-
-  it('regex pattern length is capped', () => {
-    const longPattern = 'a'.repeat(1000);
-    const { filter } = parse({ 'x[regex]': longPattern }, { maxRegexLength: 100 });
-    expect(filter).toEqual({ op: 'true' });
+  it('a regex longer than maxRegexLength is refused', () => {
+    expect(() => parse({ 'x[regex]': 'a'.repeat(1000) }, { maxRegexLength: 100 })).toThrow(
+      QueryGrammarError,
+    );
   });
 });
 
@@ -143,10 +147,11 @@ describe('parseUrl — coercion', () => {
     expect(f.value).toBeInstanceOf(Date);
   });
 
-  it('conservative heuristic does NOT coerce numeric-looking strings without a hint', () => {
-    // Classic footgun: SKU "12345" must stay a string, not become a number.
-    const { filter } = parse({ sku: '12345' });
-    expect(filter).toMatchObject({ op: 'eq', field: 'sku', value: '12345' });
+  it('without a hint, only a safe number shape coerces — never a code or an id', () => {
+    expect(parse({ qty: '12345' }).filter).toMatchObject({ value: 12345 });
+    // Leading zeros are codes; past 15 digits it is an id (and loses precision as a number).
+    expect(parse({ sku: '012345' }).filter).toMatchObject({ value: '012345' });
+    expect(parse({ ref: '1234567890123456' }).filter).toMatchObject({ value: '1234567890123456' });
   });
 
   it('fieldTypes hint forces number coercion when declared', () => {

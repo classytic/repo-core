@@ -148,6 +148,12 @@ export interface KeysetPaginationResultCore<TDoc> {
   prev?: string | null;
   /** Whether a previous page exists. Absent when the kit does not track it. */
   hasPrev?: boolean;
+  /**
+   * Cursor at this page's LAST row, whether or not more rows exist — feed it back as
+   * `after` to resume later (a change feed continues from its end, where `next` is null).
+   * `null` for an empty page. Absent when the kit does not mint it: treat as unknown.
+   */
+  end?: string | null;
 }
 
 /**

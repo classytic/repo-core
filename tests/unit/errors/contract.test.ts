@@ -24,9 +24,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ERROR_CODES } from '../../../src/errors/codes.js';
 import { statusToErrorCode, toErrorContract } from '../../../src/errors/contract.js';
 import { createError } from '../../../src/errors/create-error.js';
-import { ERROR_CODES, type HttpError } from '../../../src/errors/types.js';
+import type { HttpError } from '../../../src/errors/types.js';
 
 describe('ERROR_CODES — canonical org-wide codes', () => {
   it('matches the documented canonical lowercase set', () => {

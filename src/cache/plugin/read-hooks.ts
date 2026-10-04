@@ -83,7 +83,8 @@ function registerBefore(op: string, engine: CacheEngine, hookCtx: ReadHookContex
     }
 
     hookCtx.log.onMiss?.(key, op);
-    if (resolved.bypass) return;
+    // Bypassed or out of scope: fetch alone — joining another caller's fetch is what scoping forbids.
+    if (resolved.bypass || result.status === 'disabled') return;
 
     // Single-flight: dedupe concurrent misses for the same key. The
     // first caller "claims" the slot; subsequent callers "wait" on

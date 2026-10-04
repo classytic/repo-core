@@ -225,5 +225,5 @@ export type { FilterRaw };
 // Internal — escape SQL LIKE wildcards in a literal substring so
 // startsWith/endsWith/contains behave intuitively.
 function escapeLikePattern(value: string): string {
-  return value.replace(/[%_]/g, (c) => `\\${c}`);
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }

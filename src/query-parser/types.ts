@@ -14,6 +14,7 @@
  */
 
 import type { Filter } from '../filter/index.js';
+import type { QueryFieldType } from './coerce.js';
 
 /** Sort direction on a single field. */
 export type ParsedSortDirection = 1 | -1;
@@ -67,40 +68,27 @@ export interface ParsedQuery {
   search?: string;
 }
 
-/**
- * Configuration knobs for the parser. All optional — sane defaults cover
- * typical arc use cases.
- */
+/** Parser knobs. Every allowlist REFUSES (400) what it does not name — never drops it. */
 export interface QueryParserOptions {
-  /** Default per-page count when the URL omits `limit`. Default: 20. */
+  /** Per-page count when the URL omits `limit`. Default: 20. */
   defaultLimit?: number;
-  /** Hard cap on `limit` to prevent resource exhaustion. Default: 200. */
+  /** Cap on `limit`; a larger request is clamped to it. Default: 1000. */
   maxLimit?: number;
-  /** Allowlist of filter field names. When set, unknown fields are dropped. */
+  /** Filterable fields. */
   allowedFilterFields?: readonly string[];
-  /** Allowlist of sort field names. When set, unknown fields are dropped. */
+  /** Sortable fields. */
   allowedSortFields?: readonly string[];
-  /** Allowlist of operator names accepted in bracket syntax. */
+  /** URL operator names permitted in `field[op]`. */
   allowedOperators?: readonly BracketOperator[];
-  /** Max filter nesting depth (defends against filter-bomb URLs). Default: 10. */
-  maxFilterDepth?: number;
-  /** Regex pattern length cap (ReDoS defense). Default: 500. */
+  /** Longest text-operator value or regex pattern. Default: 500. */
   maxRegexLength?: number;
-  /** Search query length cap. Default: 200. */
+  /** Longest `search`. Default: 200. */
   maxSearchLength?: number;
   /**
-   * Field-type hints for value coercion. When a filter field is in this
-   * map, the URL string value is coerced to the declared type:
-   *   - `'number'`  → `Number(value)`
-   *   - `'boolean'` → `'true'`/`'1'` → true, else false
-   *   - `'date'`    → `new Date(value)` (validated)
-   *   - `'string'`  → left as-is (default for unlisted fields)
-   *
-   * Use this to avoid the heuristic coercion's footguns (e.g. `?sku=12345`
-   * against a string SKU column — without a hint, heuristics turn it into
-   * a number and the SQL comparison fails).
+   * Declared field types — exact coercion, and a value that does not fit is refused. Without one,
+   * the grammar's conservative heuristic applies (see `coerceQueryValue`).
    */
-  fieldTypes?: Record<string, 'string' | 'number' | 'boolean' | 'date'>;
+  fieldTypes?: Record<string, QueryFieldType>;
 }
 
 /**
@@ -124,7 +112,9 @@ export type BracketOperator =
   | 'ieq'
   | 'regex'
   | 'between'
-  | 'exists';
+  | 'exists'
+  /** Flags for the `regex` on the same field (`i`, `m`, `s`, `x`). */
+  | 'options';
 
 /**
  * Input shape for `parseUrl`. URL search params can be sourced from

@@ -17,8 +17,8 @@
  * `implements HttpError` and serialize to `ErrorContract` for the wire.
  * One contract, one canonical home, every package follows the same shape.
  *
- * **Custom-domain escape hatch.** {@link ErrorCode} is a documented union
- * of canonical codes; `code: string` accepts ANY string so domain packages
+ * **Custom-domain escape hatch.** The catalogued codes live in `codes.ts`;
+ * `code: string` accepts ANY string so domain packages
  * can extend (`'order.validation.missing_line'`, `'payment.gateway.timeout'`).
  * The canonical codes cover cross-cutting concerns; domain extensions
  * hierarchically narrow.
@@ -136,36 +136,3 @@ export interface ErrorDetail {
   message: string;
   meta?: Readonly<Record<string, unknown>>;
 }
-
-// ============================================================================
-// Canonical codes
-// ============================================================================
-
-/**
- * Cross-cutting error codes used across the org. Every canonical code is
- * lowercase + snake_case to match RFC 7807, Stripe, and Shopify
- * conventions. Domain packages add their own hierarchical codes
- * (`'order.validation.*'`, `'payment.gateway.*'`); these cover the
- * universal cases every HTTP-emitting layer needs.
- *
- * **Arc compatibility note.** Arc's `ArcError` hierarchy historically
- * uses UPPER_SNAKE codes (`'NOT_FOUND'`, `'VALIDATION_ERROR'`) for
- * back-compat with hosts that switch on those values. New code should
- * prefer the canonical lowercase codes; arc keeps emitting its UPPER_SNAKE
- * codes on the wire so existing client switches keep working.
- */
-export const ERROR_CODES = {
-  VALIDATION: 'validation_error',
-  NOT_FOUND: 'not_found',
-  CONFLICT: 'conflict',
-  UNAUTHORIZED: 'unauthorized',
-  FORBIDDEN: 'forbidden',
-  RATE_LIMITED: 'rate_limited',
-  IDEMPOTENCY_CONFLICT: 'idempotency_conflict',
-  PRECONDITION_FAILED: 'precondition_failed',
-  INTERNAL: 'internal_error',
-  UNAVAILABLE: 'service_unavailable',
-  TIMEOUT: 'timeout',
-} as const;
-
-export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

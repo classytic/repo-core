@@ -8,6 +8,15 @@
  */
 
 export {
+  ARC_ERROR_CODES,
+  ARC_REASON_CODES,
+  type ArcErrorCode,
+  type ArcReasonCode,
+  DUPLICATE_KEY_DETAIL_CODE,
+  ERROR_CODES,
+  type ErrorCode,
+} from './codes.js';
+export {
   conservativeMongoIsTransientConflict,
   type IsTransientConflictFn,
   isVersionConflictError,
@@ -23,12 +32,10 @@ export {
   toDuplicateKeyHttpError,
 } from './duplicate-key.js';
 export { errorContractSchema, errorDetailSchema } from './schema.js';
-export {
-  type DuplicateKeyMeta,
-  ERROR_CODES,
-  type ErrorCode,
-  type ErrorContract,
-  type ErrorDetail,
-  type HttpError,
-  type ValidationErrorMeta,
+export type {
+  DuplicateKeyMeta,
+  ErrorContract,
+  ErrorDetail,
+  HttpError,
+  ValidationErrorMeta,
 } from './types.js';

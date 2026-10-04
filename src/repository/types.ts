@@ -882,7 +882,7 @@ export type AggCacheOptions = import('../cache/options.js').CacheOptions;
  * | --------------- | ------------------------------ | ------------------------ | ----------- |
  * | `allowDiskUse`  | `aggregate({ allowDiskUse })`  | ignored (planner spills) | per-driver  |
  * | `maxTimeMs`     | `aggregate({ maxTimeMS })`     | ignored (sync driver)    | per-driver  |
- * | `indexHint`     | `aggregate({ hint })`          | ignored (planner-driven) | per-driver  |
+ * | `indexHint`     | `{ leadingKeys }` checked; else `hint` | ignored (planner-driven) | per-driver  |
  *
  * **Hosts that need a hint to work** must pin the kit version that
  * supports it via peer-deps. Falling back to "ignored" keeps mixed-
@@ -912,10 +912,11 @@ export interface AggExecutionHints {
    */
   maxTimeMs?: number;
   /**
-   * Index hint passed to the planner. Kit-specific shape:
-   * mongokit accepts `{ field: 1 }` or an index name string;
-   * sqlitekit ignores (the SQLite planner picks indexes itself).
-   * Use sparingly — most aggregations plan correctly without hints.
+   * Index hint. The PORTABLE form is `{ leadingKeys: string[] }` — an expectation that an index
+   * leading with those fields serves this read. It is never forced: mongokit checks a declared
+   * index matches (and throws a configuration error naming what is declared if none does); kits
+   * whose planner picks indexes itself (sqlitekit) ignore it. Any other shape is kit-specific and
+   * FORCED — mongokit sends a `{ field: 1 }` object or an index name as the driver `hint`.
    */
   indexHint?: unknown;
 }
