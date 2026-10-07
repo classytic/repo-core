@@ -4,6 +4,33 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-10-06
+
+### Added — command streams and a shared catalog in `./sync`
+
+- **`CommandStreamStore`**: the server side of a command-sync protocol. It records one verdict per
+  sequence number (carrying the command's `fingerprint`) and a per-stream watermark bound to a
+  tenant, all in the transaction of the command's effects. `createMemoryCommandStreamStore` is
+  the reference implementation; mongokit ships the durable one.
+- **Resolutions and aliases** on the same contract:
+  - outcome `resolved`;
+  - a refused verdict keeps its `body` and `dependsOn`;
+  - `resolution` attribution;
+  - `record` replaces;
+  - `blockedOn(commandId)`;
+  - `alias` / `aliasOf`: tenant-scoped, and one local id names one record.
+- **`runCommandStreamStoreConformance`** (`./testing`): eight cases. One of them is serialisation:
+  twenty concurrent advances of one stream must reach 20.
+- **`runChangeLogStoreConformance`** (`./testing`): eleven cases. These include commit order: an
+  entry that commits after a reader's checkpoint must still reach that reader.
+- **`ChangesSinceOptions.sharedScopes`**: company-wide scopes (a catalog) that every tenant reads,
+  whatever tenant their entries carry.
+
+### Removed
+
+- `PushMutation`, `PushVerdict`, `PushVerdictStatus`. Nothing consumed them; command streams
+  replace them.
+
 ## [0.29.0] - 2026-09-23
 
 ### ⚠ Changed — ONE list-query grammar, held to by every parser (`./query-parser`)
