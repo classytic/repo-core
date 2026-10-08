@@ -19,6 +19,13 @@
  * `describe` / `it` / `expect` / `beforeEach` / `afterEach` globals works.
  */
 
+export type { ChangeLogConformanceHarness } from './change-log-conformance.js';
+export { changeLogStoreCases, runChangeLogStoreConformance } from './change-log-conformance.js';
+export type { CommandStreamConformanceHarness } from './command-stream-conformance.js';
+export {
+  commandStreamStoreCases,
+  runCommandStreamStoreConformance,
+} from './command-stream-conformance.js';
 export { runStandardRepoConformance } from './conformance.js';
 export type { IdempotencyConformanceHarness } from './idempotency-conformance.js';
 export {
@@ -26,7 +33,6 @@ export {
   runIdempotencyStoreConformance,
 } from './idempotency-conformance.js';
 export type { LockConformanceHarness } from './lock-conformance.js';
-
 export { runLockAdapterConformance } from './lock-conformance.js';
 export type {
   PurgeConformanceContext,
@@ -53,7 +59,3 @@ export type {
 } from './types.js';
 export type { UsageConformanceHarness } from './usage-conformance.js';
 export { runUsageStoreContract } from './usage-conformance.js';
-export type { ChangeLogConformanceHarness } from './change-log-conformance.js';
-export { changeLogStoreCases, runChangeLogStoreConformance } from './change-log-conformance.js';
-export type { CommandStreamConformanceHarness } from './command-stream-conformance.js';
-export { commandStreamStoreCases, runCommandStreamStoreConformance } from './command-stream-conformance.js';
