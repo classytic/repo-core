@@ -45,6 +45,11 @@ export {
 export type { LockConformanceHarness } from './lock-conformance.js';
 export { runLockAdapterConformance } from './lock-conformance.js';
 export {
+  type MergeKeysetFixture,
+  type MergeKeysetHarness,
+  runMergeKeysetConformance,
+} from './merge-keyset-conformance.js';
+export {
   type PaginationPropertyFixture,
   type PaginationPropertyHarness,
   type PropertyRow,

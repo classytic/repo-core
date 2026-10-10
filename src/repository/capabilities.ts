@@ -242,4 +242,6 @@ export interface RepoCapabilities {
   bulkUpsert?: boolean;
   /** Read-model primitives (increments with dedupe, rebuild, reconcile). Gates the `read model` group. */
   readModel?: boolean;
+  /** Kit sources compose with `mergeKeysetPages` (scope-bound per-row cursors). Gates `runMergeKeysetConformance`. */
+  mergeKeyset?: boolean;
 }

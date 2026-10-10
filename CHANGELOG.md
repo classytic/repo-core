@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.31.0] - unreleased
 
+### Added — `mergeKeysetPages` (`./pagination`) and `runMergeKeysetConformance` (`./testing`)
+
+One keyset page over several sources sharing a total order, with ONE composite cursor (all sources resume from
+the merge frontier; bound to source names + scopes + sort; HMAC-signed with `secret`). Closed
+`MERGE_CURSOR_ERROR_CODES` (`repo.cursor.invalid`, `repo.cursor.scope_mismatch`, 400). fast-check properties in
+the unit suite; the kit-level property is gated by `RepoCapabilities.mergeKeyset`. `ARC_ERROR_CODES` gains
+`PAGINATION_INVALID_MODE` (`arc.pagination.invalid_mode`).
+
 ### Added — `runReadModelPropertyConformance` (`./testing`, fast-check, gated by `readModel`)
 
 Random increments with random replays equal the source (zero drift); a rebuild keeps zero drift; corrupting one grain

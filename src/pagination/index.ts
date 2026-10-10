@@ -24,6 +24,13 @@ export {
   validateKeysetSort,
 } from './keyset.js';
 export {
+  type KeysetSource,
+  MERGE_CURSOR_ERROR_CODES,
+  type MergedKeysetPage,
+  type MergeKeysetOptions,
+  mergeKeysetPages,
+} from './merge-keyset.js';
+export {
   calculateSkip,
   calculateTotalPages,
   shouldWarnDeepPagination,
