@@ -238,4 +238,8 @@ export interface RepoCapabilities {
    * or gap, and offset pages never repeat a row. Gates `runPaginationPropertyConformance` (fast-check).
    */
   paginationProperties?: boolean;
+  /** `bulkUpsert(rows, { key, set, inc, setOnInsert })` with exact per-row outcomes. Gates the `bulkUpsert` group. */
+  bulkUpsert?: boolean;
+  /** Read-model primitives (increments with dedupe, rebuild, reconcile). Gates the `read model` group. */
+  readModel?: boolean;
 }

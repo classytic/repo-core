@@ -1731,6 +1731,15 @@ export interface StandardRepo<TDoc> extends MinimalRepo<TDoc> {
    */
   getByIds?(ids: readonly string[], options?: FindAllOptions): Promise<Map<string, TDoc>>;
 
+  /**
+   * Many keyed upserts in one command with an exact per-row outcome (see `./bulk-upsert.ts`).
+   * Optional; gated by `RepoCapabilities.bulkUpsert`.
+   */
+  bulkUpsert?(
+    rows: readonly Record<string, unknown>[],
+    options: import('./bulk-upsert.js').BulkUpsertOptions,
+  ): Promise<import('./bulk-upsert.js').BulkUpsertResult>;
+
   // ── Projections & existence ──────────────────────────────────────────
   count?(filter?: FilterInput, options?: QueryOptions): Promise<number>;
   exists?(filter: FilterInput, options?: QueryOptions): Promise<boolean | { _id: unknown } | null>;

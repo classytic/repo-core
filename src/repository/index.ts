@@ -39,6 +39,17 @@ export {
   runChunkedArchive,
 } from './archive.js';
 export { RepositoryBase, type RepositoryBaseOptions } from './base.js';
+export {
+  BULK_UPSERT_ERROR_CODES,
+  BULK_UPSERT_FAILURE_CODES,
+  type BulkUpsertFailureCode,
+  type BulkUpsertOptions,
+  type BulkUpsertOutcome,
+  type BulkUpsertResult,
+  type BulkUpsertRowResult,
+  bulkUpsertOptionsError,
+  summarizeBulkUpsert,
+} from './bulk-upsert.js';
 export type { AggregateOpsSupport, RepoCapabilities } from './capabilities.js';
 export {
   createDistributionGuard,

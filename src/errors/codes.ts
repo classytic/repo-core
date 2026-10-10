@@ -113,6 +113,10 @@ export const ARC_ERROR_CODES = {
   ADAPTER_CAPABILITY_REQUIRED: 'arc.adapter.capability_required',
   NO_ADAPTER: 'arc.no_adapter',
 
+  // Pagination.
+  /** HTTP 400 — the `mode` query param is neither `offset` nor `keyset`. */
+  PAGINATION_INVALID_MODE: 'arc.pagination.invalid_mode',
+
   // Aggregation.
   AGGREGATION_MAX_GROUPS_EXCEEDED: 'arc.aggregation.max_groups_exceeded',
   AGGREGATION_REQUIRED_FILTER_MISSING: 'arc.aggregation.required_filter_missing',

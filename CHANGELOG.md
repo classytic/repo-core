@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.31.0] - unreleased
 
+### Added — `runReadModelPropertyConformance` (`./testing`, fast-check, gated by `readModel`)
+
+Random increments with random replays equal the source (zero drift); a rebuild keeps zero drift; corrupting one grain
+yields exactly one drift row naming it.
+
+### Added — `bulkUpsert` IR (`./repository`)
+
+`StandardRepo.bulkUpsert?(rows, { key, set, inc, setOnInsert, ordered })` returns `{ results: [{ index, key, outcome,
+code? }], inserted, updated, unchanged, failed }`; closed `BULK_UPSERT_FAILURE_CODES` / `BULK_UPSERT_ERROR_CODES`;
+`bulkUpsertOptionsError`, `summarizeBulkUpsert`. Gated conformance groups `bulkUpsert` and `readModel`
+(`RepoCapabilities.bulkUpsert?` / `readModel?`). The data-access suite owns each group's fixture lifecycle once.
+
+### Changed — `before` and `mode` are reserved (`./query-parser`)
+
+`STANDARD_RESERVED_PARAMS` gains `before` and `mode`; `readPageRequest` returns them (`PageRequest.before`,
+`.mode`), refusing both cursors at once and any mode other than `offset` / `keyset`. A kit that treated
+`?before=` / `?mode=` as filters stops doing so.
+
 ### Added — capability-gated data-access conformance (`./testing`)
 
 - **`runDataAccessConformance(harness)`**: behaviour groups a kit opts into through

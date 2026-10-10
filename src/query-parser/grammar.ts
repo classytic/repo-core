@@ -435,6 +435,10 @@ export interface PageRequest {
   readonly page?: number;
   /** Keyset cursor (`after`, or its alias `cursor`). */
   readonly after?: string;
+  /** Keyset cursor for the PREVIOUS page. Never together with `after`. */
+  readonly before?: string;
+  /** Explicit paging mode, when the caller named one. */
+  readonly mode?: 'offset' | 'keyset';
 }
 
 export interface PageOptions {
@@ -444,16 +448,38 @@ export interface PageOptions {
 
 /** `limit`/`page` must be positive integers; a `limit` above the cap is clamped to it. */
 export function readPageRequest(
-  input: { page?: unknown; limit?: unknown; after?: unknown; cursor?: unknown },
+  input: {
+    page?: unknown;
+    limit?: unknown;
+    after?: unknown;
+    cursor?: unknown;
+    before?: unknown;
+    mode?: unknown;
+  },
   options: PageOptions = {},
 ): PageRequest {
   const maxLimit = options.maxLimit ?? DEFAULT_MAX_LIMIT;
   const requested = positiveInt(input.limit, 'limit');
   const limit = Math.min(requested ?? options.defaultLimit ?? DEFAULT_LIMIT, maxLimit);
+  const mode = pageMode(input.mode);
+  const withMode = <T extends object>(r: T): T & { mode?: 'offset' | 'keyset' } =>
+    mode ? { ...r, mode } : r;
   const after = cursorValue(input.after ?? input.cursor);
-  if (after !== undefined) return { limit, after };
+  const before = cursorValue(input.before);
+  if (after !== undefined && before !== undefined) {
+    throw new QueryGrammarError('before', 'pass after or before, not both');
+  }
+  if (after !== undefined) return withMode({ limit, after });
+  if (before !== undefined) return withMode({ limit, before });
   const page = positiveInt(input.page, 'page');
-  return page === undefined ? { limit } : { limit, page };
+  return withMode(page === undefined ? { limit } : { limit, page });
+}
+
+function pageMode(raw: unknown): 'offset' | 'keyset' | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const value = String(raw).trim();
+  if (value === 'offset' || value === 'keyset') return value;
+  throw new QueryGrammarError('mode', 'mode is offset or keyset');
 }
 
 /** `sort=-createdAt,name` or qs `sort[createdAt]=desc`. An invalid or disallowed field is refused. */

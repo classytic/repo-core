@@ -28,6 +28,10 @@ describe('error-code catalog', () => {
     for (const code of Object.values(ERROR_CODES)) expect(code).toMatch(/^[a-z]+(_[a-z]+)*$/);
   });
 
+  it('catalogues arc keyset paging refusals', () => {
+    expect(ARC_ERROR_CODES.PAGINATION_INVALID_MODE).toBe('arc.pagination.invalid_mode');
+  });
+
   it('arc codes are `arc.` + lowercase dot/snake segments', () => {
     for (const code of Object.values(ARC_ERROR_CODES)) {
       expect(code).toMatch(/^arc(\.[a-z]+(_[a-z]+)*)+$/);

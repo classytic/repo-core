@@ -28,19 +28,15 @@ export {
 } from './command-stream-conformance.js';
 export { runStandardRepoConformance } from './conformance.js';
 export {
+  type BulkUpsertFixture,
   type DataAccessCapability,
   type DataAccessConformanceHarness,
   dataAccessGroupState,
   type OrderedIdsFixture,
+  type ReadModelFixture,
   runDataAccessConformance,
   type ScopedJoinFixture,
 } from './data-access-conformance.js';
-export {
-  type PaginationPropertyFixture,
-  type PaginationPropertyHarness,
-  type PropertyRow,
-  runPaginationPropertyConformance,
-} from './pagination-property-conformance.js';
 export type { IdempotencyConformanceHarness } from './idempotency-conformance.js';
 export {
   idempotencyStoreCases,
@@ -48,6 +44,12 @@ export {
 } from './idempotency-conformance.js';
 export type { LockConformanceHarness } from './lock-conformance.js';
 export { runLockAdapterConformance } from './lock-conformance.js';
+export {
+  type PaginationPropertyFixture,
+  type PaginationPropertyHarness,
+  type PropertyRow,
+  runPaginationPropertyConformance,
+} from './pagination-property-conformance.js';
 export type {
   PurgeConformanceContext,
   PurgeConformanceHarness,
@@ -64,6 +66,10 @@ export {
   type QueryGrammarParsed,
   runQueryGrammarConformance,
 } from './query-grammar-conformance.js';
+export {
+  type ReadModelPropertyHarness,
+  runReadModelPropertyConformance,
+} from './read-model-property-conformance.js';
 export type {
   AggregateOpsSupport,
   ConformanceContext,

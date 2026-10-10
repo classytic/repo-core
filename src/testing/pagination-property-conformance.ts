@@ -31,7 +31,11 @@ export interface PaginationPropertyFixture {
     limit: number;
     after?: string;
   }): Promise<{ data: PropertyRow[]; next: string | null }>;
-  offsetPage(params: { sort: Record<string, 1 | -1>; page: number; limit: number }): Promise<{ data: PropertyRow[] }>;
+  offsetPage(params: {
+    sort: Record<string, 1 | -1>;
+    page: number;
+    limit: number;
+  }): Promise<{ data: PropertyRow[] }>;
   /** Remove every row (called between property runs). */
   reset(): Promise<void>;
   cleanup(): Promise<void>;
@@ -109,7 +113,9 @@ export function runPaginationPropertyConformance(harness: PaginationPropertyHarn
               const walked = await walkKeyset(f, { [field]: dir }, limit);
               expect(new Set(walked.map((r) => r.id)).size).toBe(rows.length);
               const keys = walked.map((r) => r[field]);
-              const sorted = [...walked].sort((a, b) => compare(a, b, field, dir)).map((r) => r[field]);
+              const sorted = [...walked]
+                .sort((a, b) => compare(a, b, field, dir))
+                .map((r) => r[field]);
               expect(keys).toEqual(sorted);
             },
           ),
@@ -130,7 +136,11 @@ export function runPaginationPropertyConformance(harness: PaginationPropertyHarn
               fc.oneof(
                 fc.record({ op: fc.constant('insert' as const), row: rowArb }),
                 fc.record({ op: fc.constant('delete' as const), at: fc.nat() }),
-                fc.record({ op: fc.constant('move' as const), at: fc.nat(), k: fc.option(fc.integer({ min: -5, max: 5 }), { nil: null }) }),
+                fc.record({
+                  op: fc.constant('move' as const),
+                  at: fc.nat(),
+                  k: fc.option(fc.integer({ min: -5, max: 5 }), { nil: null }),
+                }),
               ),
               { maxLength: 12 },
             ),
@@ -160,7 +170,10 @@ export function runPaginationPropertyConformance(harness: PaginationPropertyHarn
               const seen = walked.map((r) => r.id);
               for (const id of ids) {
                 if (touched.has(id)) continue;
-                expect(seen.filter((x) => x === id), `untouched row ${id}`).toHaveLength(1);
+                expect(
+                  seen.filter((x) => x === id),
+                  `untouched row ${id}`,
+                ).toHaveLength(1);
               }
             },
           ),
