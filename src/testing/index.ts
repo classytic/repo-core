@@ -27,6 +27,20 @@ export {
   runCommandStreamStoreConformance,
 } from './command-stream-conformance.js';
 export { runStandardRepoConformance } from './conformance.js';
+export {
+  type DataAccessCapability,
+  type DataAccessConformanceHarness,
+  dataAccessGroupState,
+  type OrderedIdsFixture,
+  runDataAccessConformance,
+  type ScopedJoinFixture,
+} from './data-access-conformance.js';
+export {
+  type PaginationPropertyFixture,
+  type PaginationPropertyHarness,
+  type PropertyRow,
+  runPaginationPropertyConformance,
+} from './pagination-property-conformance.js';
 export type { IdempotencyConformanceHarness } from './idempotency-conformance.js';
 export {
   idempotencyStoreCases,

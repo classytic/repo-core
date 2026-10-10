@@ -77,7 +77,8 @@ export default defineConfig({
     // on install while never importing `./testing` at all. It lives in
     // devDependencies for this package's own tests, which means the bundler
     // would happily inline it — this gate keeps the import external.
-    neverBundle: [/^@classytic\//, /^@spinekit\//, /^vitest$/],
+    // `fast-check` (the property suites) stays external for the same reason as vitest.
+    neverBundle: [/^@classytic\//, /^@spinekit\//, /^vitest$/, /^fast-check$/],
   },
   publint: 'ci-only',
   attw: 'ci-only',

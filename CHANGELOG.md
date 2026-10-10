@@ -4,6 +4,25 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - unreleased
+
+### Added — capability-gated data-access conformance (`./testing`)
+
+- **`runDataAccessConformance(harness)`**: behaviour groups a kit opts into through
+  `RepoCapabilities`. An undeclared capability is reported as a skipped group whose title names
+  it (never a silent pass); a declared capability without its fixture FAILS.
+  `dataAccessGroupState` is that decision, unit-tested.
+- Groups: **`getByIdsOrdered`** (`getByIds(ids, { preserveOrder: true, chunkSize })` aligned with
+  the input, the same answer at any chunk size) and **`scopedJoins`** (a join reads only the
+  caller tenant's live rows of the joined collection; an unresolvable join is refused).
+- **`runPaginationPropertyConformance(harness)`** (fast-check, gated by
+  `RepoCapabilities.paginationProperties`): a full keyset walk equals an in-memory sort (nulls,
+  ties); under concurrent inserts / deletes / key moves every untouched row is returned exactly
+  once (a moved row may repeat; no keyset scheme can promise more); an offset page never repeats.
+  The consumer provides `fast-check` (like `vitest`); it is never bundled.
+- **`RepoCapabilities.getByIdsOrdered?` / `scopedJoins?` / `paginationProperties?`** — optional, so kits that do not declare
+  them (sqlitekit, pgkit, mysqlkit, prismakit, webdb-kit) keep passing unchanged.
+
 ## [0.30.0] - 2026-10-06
 
 ### Added — command streams and a shared catalog in `./sync`

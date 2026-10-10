@@ -221,4 +221,21 @@ export interface RepoCapabilities {
   lookupPopulate?: boolean;
   /** `cursor(filter, options)` streaming reads (AsyncIterable batches). */
   streaming?: boolean;
+  /**
+   * `getByIds(ids, { preserveOrder: true, chunkSize })`: an array aligned with `ids` (undefined
+   * for a miss), the same answer at any chunk size. Gates the `getByIds (ordered, chunked)`
+   * group of `runDataAccessConformance`.
+   */
+  getByIdsOrdered?: boolean;
+  /**
+   * Every join (`aggregate({ lookups })`) reads the joined collection under its own tenant and
+   * soft-delete scope, and a join into a collection the kit cannot resolve is refused. Gates the
+   * `scoped joins` group of `runDataAccessConformance`.
+   */
+  scopedJoins?: boolean;
+  /**
+   * Keyset walks equal an in-memory sort (nulls, ties), survive concurrent writes with no duplicate
+   * or gap, and offset pages never repeat a row. Gates `runPaginationPropertyConformance` (fast-check).
+   */
+  paginationProperties?: boolean;
 }
