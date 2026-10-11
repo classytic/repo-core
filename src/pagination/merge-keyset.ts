@@ -8,13 +8,9 @@
  */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { CURSOR_ERROR_CODES } from '../errors/codes.js';
 import { createError } from '../errors/create-error.js';
 import type { HttpError } from '../errors/types.js';
-
-export const MERGE_CURSOR_ERROR_CODES = {
-  INVALID: 'repo.cursor.invalid',
-  SCOPE_MISMATCH: 'repo.cursor.scope_mismatch',
-} as const;
 
 export interface KeysetSource<T> {
   /** Unique among the merged sources; part of the cursor binding. */
@@ -74,8 +70,7 @@ function cursorError(message: string, code: string): HttpError {
   return Object.assign(createError(400, message), { code });
 }
 
-const invalid = (why: string) =>
-  cursorError(`Invalid cursor: ${why}`, MERGE_CURSOR_ERROR_CODES.INVALID);
+const invalid = (why: string) => cursorError(`Invalid cursor: ${why}`, CURSOR_ERROR_CODES.INVALID);
 
 function encode(payload: Payload, secret: string | undefined): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -171,7 +166,7 @@ export async function mergeKeysetPages<T>(
     if (p.fp !== fp || p.p.length !== sources.length) {
       throw cursorError(
         'Invalid cursor: it was issued for different sources, scopes or sort',
-        MERGE_CURSOR_ERROR_CODES.SCOPE_MISMATCH,
+        CURSOR_ERROR_CODES.SCOPE_MISMATCH,
       );
     }
     positions = p.p;

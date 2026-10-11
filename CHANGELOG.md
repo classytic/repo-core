@@ -4,13 +4,14 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.31.0] - unreleased
+## [0.31.0] - 2026-10-11
 
 ### Added — `mergeKeysetPages` (`./pagination`) and `runMergeKeysetConformance` (`./testing`)
 
 One keyset page over several sources sharing a total order, with ONE composite cursor (all sources resume from
-the merge frontier; bound to source names + scopes + sort; HMAC-signed with `secret`). Closed
-`MERGE_CURSOR_ERROR_CODES` (`repo.cursor.invalid`, `repo.cursor.scope_mismatch`, 400). fast-check properties in
+the merge frontier; bound to source names + scopes + sort; HMAC-signed with `secret`). `CURSOR_ERROR_CODES` (`repo.cursor.invalid`, `repo.cursor.scope_mismatch`, 400) is the ONE vocabulary for every
+kit's keyset-cursor refusals, merged or not. It lives in the browser-safe `./errors` catalogue (no `node:` import is
+reachable from that entry; pinned by `tests/unit/errors/browser-safe.test.ts`) and is re-exported by `./pagination`. fast-check properties in
 the unit suite; the kit-level property is gated by `RepoCapabilities.mergeKeyset`. `ARC_ERROR_CODES` gains
 `PAGINATION_INVALID_MODE` (`arc.pagination.invalid_mode`).
 

@@ -7,8 +7,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  CURSOR_ERROR_CODES,
   type KeysetSource,
-  MERGE_CURSOR_ERROR_CODES,
   mergeKeysetPages,
 } from '../../../src/pagination/index.js';
 
@@ -122,9 +122,9 @@ describe('mergeKeysetPages', () => {
           expect(new Set(ids).size).toBe(ids.length);
           for (const r of a) expect(ids).toContain(`A:${r.id}`);
           for (const r of b) expect(ids).toContain(`B:${r.id}`);
-        // Never out of order, even for rows inserted into a source that emitted nothing yet.
-        const keys = got.map((g) => g.row.k ?? Number.NEGATIVE_INFINITY);
-        expect(keys).toEqual([...keys].sort((x, y) => x - y));
+          // Never out of order, even for rows inserted into a source that emitted nothing yet.
+          const keys = got.map((g) => g.row.k ?? Number.NEGATIVE_INFINITY);
+          expect(keys).toEqual([...keys].sort((x, y) => x - y));
         },
       ),
       { numRuns: 60 },
@@ -178,7 +178,7 @@ describe('mergeKeysetPages', () => {
           await code(
             mergeKeysetPages(two(), { sort: sortOf(1), limit: 2, cursor: bad, secret: SECRET }),
           ),
-        ).toEqual([400, MERGE_CURSOR_ERROR_CODES.INVALID]);
+        ).toEqual([400, CURSOR_ERROR_CODES.INVALID]);
       }
     });
 
@@ -193,7 +193,7 @@ describe('mergeKeysetPages', () => {
       ] as const) {
         expect(
           await code(mergeKeysetPages(sources, { sort, limit: 2, cursor: c, secret: SECRET })),
-        ).toEqual([400, MERGE_CURSOR_ERROR_CODES.SCOPE_MISMATCH]);
+        ).toEqual([400, CURSOR_ERROR_CODES.SCOPE_MISMATCH]);
       }
     });
 

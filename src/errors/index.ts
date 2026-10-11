@@ -12,6 +12,8 @@ export {
   ARC_REASON_CODES,
   type ArcErrorCode,
   type ArcReasonCode,
+  CURSOR_ERROR_CODES,
+  type CursorErrorCode,
   DUPLICATE_KEY_DETAIL_CODE,
   ERROR_CODES,
   type ErrorCode,

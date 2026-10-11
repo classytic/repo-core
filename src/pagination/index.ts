@@ -10,6 +10,8 @@
  * decoded cursor to a SQL/Mongo/Prisma WHERE clause lives in each kit.
  */
 
+/** Re-exported for convenience; browser bundles import it from `@classytic/repo-core/errors`. */
+export { CURSOR_ERROR_CODES } from '../errors/codes.js';
 export { isPaginatedResult, toCanonicalList } from './canonical.js';
 export {
   decodeCursor,
@@ -25,7 +27,6 @@ export {
 } from './keyset.js';
 export {
   type KeysetSource,
-  MERGE_CURSOR_ERROR_CODES,
   type MergedKeysetPage,
   type MergeKeysetOptions,
   mergeKeysetPages,

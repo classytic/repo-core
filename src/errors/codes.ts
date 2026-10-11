@@ -148,4 +148,17 @@ export const ARC_REASON_CODES = {
 export type ArcReasonCode = (typeof ARC_REASON_CODES)[keyof typeof ARC_REASON_CODES];
 
 /** `details[].code` for a unique-constraint violation (see `toErrorContract`). */
+// ============================================================================
+// Cursors — every kit's keyset-cursor refusals (FROZEN: clients restart paging on these)
+// ============================================================================
+
+export const CURSOR_ERROR_CODES = {
+  /** HTTP 400 — malformed, truncated, wrong sort/version, or failed HMAC. */
+  INVALID: 'repo.cursor.invalid',
+  /** HTTP 400 — minted for another collection, tenant, filter, collation or source set. */
+  SCOPE_MISMATCH: 'repo.cursor.scope_mismatch',
+} as const;
+
+export type CursorErrorCode = (typeof CURSOR_ERROR_CODES)[keyof typeof CURSOR_ERROR_CODES];
+
 export const DUPLICATE_KEY_DETAIL_CODE = 'duplicate_key';
