@@ -205,17 +205,14 @@ describe('createBatchLoader — refusals', () => {
     expect(() => loader.load({ sku: 'a' })).toThrow(/needs an explicit `keyOf`/);
   });
 
-  it.each([
-    Number.NaN,
-    0,
-    -1,
-    2.5,
-    Number.POSITIVE_INFINITY,
-  ])('REFUSES maxBatchSize %p at construction rather than hanging every waiter', (bad) => {
-    expect(() =>
-      createBatchLoader<string, string>({ batch: async (k) => [...k], maxBatchSize: bad }),
-    ).toThrow(/positive integer/);
-  });
+  it.each([Number.NaN, 0, -1, 2.5, Number.POSITIVE_INFINITY])(
+    'REFUSES maxBatchSize %p at construction rather than hanging every waiter',
+    (bad) => {
+      expect(() =>
+        createBatchLoader<string, string>({ batch: async (k) => [...k], maxBatchSize: bad }),
+      ).toThrow(/positive integer/);
+    },
+  );
 
   it('clear(key) does not abandon the caller already waiting on an in-flight fetch', async () => {
     let n = 0;

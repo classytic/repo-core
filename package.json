@@ -1,7 +1,7 @@
 {
   "name": "@classytic/repo-core",
-  "version": "0.31.0",
-  "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design \u2014 no plugins ship here; each kit owns its own.",
+  "version": "0.31.1",
+  "description": "Driver-agnostic repository primitives: hooks, Filter IR, operations, pagination, cache contract. Foundation for mongokit, sqlitekit, pgkit, and prismakit. Lean by design — no plugins ship here; each kit owns its own.",
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -168,9 +168,17 @@
     "publish:dry": "npm publish --dry-run --access public",
     "publish:npm": "npm publish --access public"
   },
+  "peerDependencies": {
+    "fast-check": "^4.7.0"
+  },
+  "peerDependenciesMeta": {
+    "fast-check": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
-    "@biomejs/biome": "^2.4.12",
+    "@biomejs/biome": "^2.5.15",
     "@classytic/dev-tools": "^0.2.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^4.1.4",

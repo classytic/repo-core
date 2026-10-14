@@ -4,6 +4,14 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-10-13
+
+### Fixed — `fast-check` is an optional peer of `./testing`
+`./testing` imports `fast-check` at runtime (`runMergeKeysetConformance`, the pagination and read-model property suites) but 0.31.0 declared it only as a devDependency, so a kit running its conformance suite failed to load with `Cannot find package 'fast-check'`. It is now an optional peer (`^4.7.0`): only a consumer that imports `./testing` installs it; the other entries still carry zero dependencies.
+
+### Changed — dev toolchain
+Biome 2.5.15 (config migrated; two test lines tightened for `noUnsafeOptionalChaining`). No runtime change.
+
 ## [0.31.0] - 2026-10-11
 
 ### Added — `mergeKeysetPages` (`./pagination`) and `runMergeKeysetConformance` (`./testing`)

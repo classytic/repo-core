@@ -69,7 +69,9 @@ describe('coerceFilterDates', () => {
       $and: [{ organizationId: 'org-1' }, { createdAt: { $gte: iso } }],
     });
     const [, second] = out.$and as Record<string, unknown>[];
-    expect((second?.createdAt as Record<string, unknown>).$gte).toBeInstanceOf(Date);
+    expect((second as Record<string, Record<string, unknown>>).createdAt?.$gte).toBeInstanceOf(
+      Date,
+    );
   });
 
   it('recurses nested logical wrappers', () => {
@@ -77,8 +79,8 @@ describe('coerceFilterDates', () => {
       $or: [{ $and: [{ createdAt: { $lt: iso } }] }],
     });
     const outer = (out.$or as Record<string, unknown>[])[0];
-    const inner = (outer?.$and as Record<string, unknown>[])[0];
-    expect((inner?.createdAt as Record<string, unknown>).$lt).toBeInstanceOf(Date);
+    const inner = ((outer as Record<string, unknown>).$and as Record<string, unknown>[])[0];
+    expect((inner as Record<string, Record<string, unknown>>).createdAt?.$lt).toBeInstanceOf(Date);
   });
 
   it('recurses $not (single-object logical operator)', () => {
