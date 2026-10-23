@@ -4,6 +4,20 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-10-23
+
+### Added - `formatQuery` / `stringifyQuery` (`./query-parser`)
+
+The inverse of `parseUrl`: typed filter terms `{ field, op?, value, flags? }` plus `sort`, `page`, `limit`, `search` become the flat bracket params the parser accepts. Operators come from `URL_OPERATORS`; `between` is sent as `gte` + `lte`; `in`/`nin` take arrays; Dates go as ISO; empty values are no filter; a value the grammar cannot carry (comma in a list value, the text `null`, a repeated field and operator) throws `QueryGrammarError`. Round-trip tests cover every operator. Types: `FilterTerm`, `FilterOperator`, `FormatQueryInput`, `QueryParams`.
+
+### Added - agent skill and `llms.txt`
+
+`skills/repo-core` and `llms.txt` ship in the package, and `npm run check:skills` (part of `prepublishOnly`) verifies that every import, subpath and API name they mention exists in the built package.
+
+### Changed - peer floor to the latest published
+
+`fast-check` `^4.10.2` (optional peer of `./testing`).
+
 ## [0.31.1] - 2026-10-13
 
 ### Fixed — `fast-check` is an optional peer of `./testing`

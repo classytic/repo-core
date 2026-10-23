@@ -1,0 +1,29 @@
+# @classytic/repo-core
+
+Contract layer under mongokit, sqlitekit and arc. No root import: use subpaths (@classytic/repo-core/pagination, /errors, ...). Skill: skills/repo-core/SKILL.md.
+
+| Need | Use |
+|---|---|
+| List response shape on the wire | `toCanonicalList` from `@classytic/repo-core/pagination` |
+| Page result types | `OffsetPaginationResult`, `KeysetPaginationResult`, `PaginatedResult` |
+| Error JSON body | `toErrorContract`, `ErrorContract` from `@classytic/repo-core/errors` |
+| Throw an HTTP error | `createError`, `isHttpError` |
+| Error code vocabulary | `ERROR_CODES`, `ARC_ERROR_CODES`, `CURSOR_ERROR_CODES` |
+| Duplicate key to 409 | `toDuplicateKeyHttpError` |
+| Query string to filter, sort, page | `parseUrl` from `@classytic/repo-core/query-parser` |
+| Filters and sort to URL params (client side) | `formatQuery`, `stringifyQuery` from `@classytic/repo-core/query-parser` |
+| Portable filters | `and`, `eq`, `in_`, `between` from `@classytic/repo-core/filter` |
+| Merge tenant scope into a filter | `buildTenantScope`, `mergeScope` |
+| Portable update spec | `update`, `incFields` from `@classytic/repo-core/update` |
+| Keyset cursors | `encodeCursor`, `decodeCursor`, `mergeKeysetPages` |
+| Run once per idempotency key | `runIdempotent`, `fingerprintRequest` |
+| Retry transient errors | `withRetry`, `retryingTransaction` |
+| Batch lookups (N+1) | `createBatchLoader` |
+| Read-only repository | `asReadOnlyRepo` |
+| Hook priorities and event names | `HOOK_PRIORITY`, `HOOK_EVENTS` |
+| Cache adapter contract | `CacheAdapter`, `createMemoryCacheAdapter` |
+| Purge step for tenant cleanup | `definePurgeStep` |
+| Cross-kit conformance tests | `runStandardRepoConformance` from `@classytic/repo-core/testing` |
+
+Details: references/contracts.md (envelopes, errors, grammar), references/kit-authoring.md (kits, plugins, conformance).
+Mongo implementation: skill mongokit.

@@ -19,6 +19,14 @@ export {
   QueryGrammarError,
 } from './errors.js';
 export {
+  type FilterOperator,
+  type FilterTerm,
+  type FormatQueryInput,
+  formatQuery,
+  type QueryParams,
+  stringifyQuery,
+} from './format-query.js';
+export {
   CORE_OPERATORS,
   type CoreOperator,
   clausesToFilter,
