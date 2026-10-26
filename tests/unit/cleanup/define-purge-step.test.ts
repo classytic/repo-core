@@ -20,6 +20,7 @@ import {
   REPOSITORY_UNAVAILABLE,
   SCOPE_REQUIRED,
 } from '../../../src/cleanup/index.js';
+import type { StandardRepo } from '../../../src/repository/index.js';
 
 const NOW = new Date('2026-07-27T00:00:00.000Z');
 const ctx = (parameters?: Record<string, unknown>) => ({
@@ -45,7 +46,7 @@ function repo(
     ...(overrides.noCount
       ? {}
       : {
-          countDocuments: async (filter: Record<string, unknown>) => {
+          count: async (filter: Record<string, unknown>) => {
             calls.countFilters.push(filter);
             return overrides.count ?? 0;
           },
@@ -74,6 +75,31 @@ const spec = {
 };
 
 describe('definePurgeStep', () => {
+  it('accepts any StandardRepo without an adapter (same `count` vocabulary)', async () => {
+    // Compile-time pin: a kit repository IS a PurgeStepRepository. If the
+    // cleanup surface drifts from StandardRepo's names again, this stops
+    // typechecking instead of silently estimating 0 and failing verification.
+    const counted: Record<string, unknown>[] = [];
+    const standard: Pick<StandardRepo<unknown>, 'purgeByField' | 'count'> = {
+      purgeByField: async (_field, _value, strategy) => ({
+        strategy: strategy.type,
+        processed: 0,
+        ok: true,
+        durationMs: 0,
+      }),
+      count: async (filter) => {
+        counted.push(filter as Record<string, unknown>);
+        return 3;
+      },
+    };
+    const asStep: PurgeStepRepository = standard;
+
+    const estimate = await definePurgeStep(asStep, spec).estimate(ctx(SCOPED));
+
+    expect(estimate.estimated).toBe(3);
+    expect(counted).toEqual([{ ownerId: 'subject-1' }]);
+  });
+
   describe('declaration', () => {
     it('marks mutating strategies destructive and `skip` not', () => {
       const { r } = repo();

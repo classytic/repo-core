@@ -32,7 +32,8 @@ import type {
 
 /**
  * The repository surface a purge step needs — a structural subset of
- * `StandardRepo`, so any kit repository satisfies it without an adapter.
+ * `StandardRepo` (`purgeByField` + `count`, the same names every kit
+ * implements), so any kit repository satisfies it without an adapter.
  * Both members are optional so an engine that never wired the repository
  * yields a BLOCKER rather than a crash.
  */
@@ -43,7 +44,7 @@ export interface PurgeStepRepository {
     strategy: TenantPurgeStrategy,
     options?: TenantPurgeOptions,
   ): Promise<{ processed: number; ok: boolean; error?: { message: string } }>;
-  countDocuments?(filter: Record<string, unknown>): Promise<number>;
+  count?(filter: Record<string, unknown>): Promise<number>;
 }
 
 export interface PurgeStepSpec {
@@ -138,7 +139,7 @@ export function definePurgeStep(
         };
       }
 
-      const estimated = (await repository.countDocuments?.({ [spec.field]: scope })) ?? 0;
+      const estimated = (await repository.count?.({ [spec.field]: scope })) ?? 0;
       const blockers = (await spec.guard?.(scope, ctx)) ?? [];
 
       return {
@@ -191,7 +192,7 @@ export function definePurgeStep(
 
     async verify(ctx: CleanupStepContext): Promise<readonly CleanupStepCheck[]> {
       const scope = scopeOf(ctx, spec.parameter);
-      if (!scope || !repository?.countDocuments) {
+      if (!scope || !repository?.count) {
         // Unverifiable is a FAILED check, never a silent pass.
         return [
           {
@@ -201,7 +202,7 @@ export function definePurgeStep(
           },
         ];
       }
-      const remaining = await repository.countDocuments(filterFor(scope));
+      const remaining = await repository.count(filterFor(scope));
       return [
         {
           name: verifyName,

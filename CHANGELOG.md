@@ -4,6 +4,12 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-10-27
+
+### Changed - BREAKING: `PurgeStepRepository.countDocuments` renamed to `count` (`./cleanup`)
+
+`definePurgeStep` now counts through `count`, the `StandardRepo` name every kit implements; no kit has a `countDocuments` method. Before, a kit repository passed in (usually via an `as PurgeStepRepository` cast) previewed `estimated: 0` and failed every verify check with "could not verify". A test now checks that a `StandardRepo` is a `PurgeStepRepository` with no adapter. Migration: drop any `countDocuments: (f) => repo.count(f)` shim and pass the kit repository directly; in custom repositories and test stubs, rename `countDocuments` to `count`.
+
 ## [0.32.0] - 2026-10-23
 
 ### Added - `formatQuery` / `stringifyQuery` (`./query-parser`)
