@@ -4,6 +4,12 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-10-27
+
+### Added - `findAll` sort and limit in the standard conformance suite (`./testing`)
+
+`runStandardRepoConformance` now checks `findAll` with `sort` and `limit`: ascending and descending order over rows inserted out of order, sort applied before limit (`{ sort: { count: -1 }, limit: 1 }` is the max row), a filter combined with sort and limit, a multi-key sort, and the string sort form (`"-count"`, `"category,-count"`). Test-only: no runtime change. Verified passing on mongokit, sqlitekit (better-sqlite3 and sqlite-wasm), pgkit, prismakit and mysqlkit.
+
 ## [0.33.0] - 2026-10-27
 
 ### Changed - BREAKING: `PurgeStepRepository.countDocuments` renamed to `count` (`./cleanup`)

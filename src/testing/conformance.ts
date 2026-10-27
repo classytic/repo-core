@@ -258,6 +258,68 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
     });
 
     // ──────────────────────────────────────────────────────────────────
+    // findAll — FindAllOptions.sort + limit
+    //
+    // Rows are inserted OUT of order so natural/insertion order can never
+    // satisfy a sort assertion by accident. Sort MUST be applied before
+    // limit: `{ sort: { count: -1 }, limit: 1 }` is "the newest/max row",
+    // not "the first row, then sorted".
+    // ──────────────────────────────────────────────────────────────────
+
+    describe('findAll sort + limit', () => {
+      beforeEach(async () => {
+        await ctx.repo.createMany!([
+          harness.makeDoc({ name: 's20', category: 'a', count: 20 }),
+          harness.makeDoc({ name: 's5', category: 'b', count: 5 }),
+          harness.makeDoc({ name: 's30', category: 'a', count: 30 }),
+          harness.makeDoc({ name: 's10', category: 'b', count: 10 }),
+        ]);
+      });
+
+      const counts = (rows: TDoc[]): unknown[] => rows.map((r) => r.count);
+
+      it('sort asc returns ascending order across out-of-order rows', async () => {
+        const rows = await ctx.repo.findAll!({}, { sort: { count: 1 } });
+        expect(counts(rows)).toEqual([5, 10, 20, 30]);
+      });
+
+      it('sort desc returns descending order', async () => {
+        const rows = await ctx.repo.findAll!({}, { sort: { count: -1 } });
+        expect(counts(rows)).toEqual([30, 20, 10, 5]);
+      });
+
+      it('sort desc + limit 1 returns the max (sort applied before limit)', async () => {
+        const rows = await ctx.repo.findAll!({}, { sort: { count: -1 }, limit: 1 });
+        expect(counts(rows)).toEqual([30]);
+      });
+
+      it('sort asc + limit 2 returns the two smallest', async () => {
+        const rows = await ctx.repo.findAll!({}, { sort: { count: 1 }, limit: 2 });
+        expect(counts(rows)).toEqual([5, 10]);
+      });
+
+      it('filter + sort desc + limit 1 returns the max within the filter', async () => {
+        const rows = await ctx.repo.findAll!(eq('category', 'b'), {
+          sort: { count: -1 },
+          limit: 1,
+        });
+        expect(rows.map((r) => r.name)).toEqual(['s10']);
+      });
+
+      it('multi-key sort orders by the first key, then the second', async () => {
+        const rows = await ctx.repo.findAll!({}, { sort: { category: 1, count: -1 } });
+        expect(rows.map((r) => r.name)).toEqual(['s30', 's20', 's10', 's5']);
+      });
+
+      it('string sort form ("-count", "category,-count") is honoured', async () => {
+        const top = await ctx.repo.findAll!({}, { sort: '-count', limit: 1 });
+        expect(counts(top)).toEqual([30]);
+        const multi = await ctx.repo.findAll!({}, { sort: 'category,-count' });
+        expect(multi.map((r) => r.name)).toEqual(['s30', 's20', 's10', 's5']);
+      });
+    });
+
+    // ──────────────────────────────────────────────────────────────────
     // distinct / count / exists
     // ──────────────────────────────────────────────────────────────────
 
