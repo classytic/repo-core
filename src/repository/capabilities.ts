@@ -206,6 +206,30 @@ export interface RepoCapabilities {
    */
   regexFilter?: boolean;
   /**
+   * Filter IR `like` / `startsWith` / `endsWith` / `contains` with
+   * `caseSensitivity: 'sensitive'` match EXACTLY — case and accents.
+   * Mongokit, sqlitekit, pgkit, mysqlkit: true. Prismakit: true only on
+   * native-case providers (postgresql, cockroachdb, mongodb); on SQLite
+   * (LIKE folds ASCII case) and MySQL/SQL Server (collation folds case
+   * and usually accents) Prisma cannot express an exact match, so the
+   * kit throws on `'sensitive'` rather than return folded rows.
+   *
+   * **Absent means supported** — the reverse of most flags here, because
+   * every kit that predates the flag already honours it. Only an explicit
+   * `false` gates the conformance scenarios off.
+   */
+  caseSensitiveStringOps?: boolean;
+  /**
+   * Arbitrary `like` patterns — an unescaped `_` (one character) or a
+   * mid-pattern `%` — are supported. Kits whose query layer only exposes
+   * prefix / suffix / substring predicates (Prisma's `startsWith` /
+   * `endsWith` / `contains`) declare `false` and throw on such patterns.
+   *
+   * **Absent means supported** (same posture as
+   * {@link caseSensitiveStringOps}).
+   */
+  likeWildcards?: boolean;
+  /**
    * `watch(filter?)` change feed — `AsyncIterable<ChangeEvent<TDoc>>`.
    * Mongokit: Mongo change streams (replica set required). Kits without
    * a native feed leave this false and omit the method.

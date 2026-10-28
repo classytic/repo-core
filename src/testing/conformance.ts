@@ -14,7 +14,19 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isVersionConflictError } from '../errors/index.js';
-import { and, eq, gt, in_, isNull, like, ne, or } from '../filter/index.js';
+import {
+  and,
+  contains,
+  endsWith,
+  eq,
+  gt,
+  in_,
+  isNull,
+  like,
+  ne,
+  or,
+  startsWith,
+} from '../filter/index.js';
 import type { OffsetPaginationResult } from '../pagination/types.js';
 import type { RepoCapabilities } from '../repository/capabilities.js';
 import type { KeysetAggPaginationResult } from '../repository/types.js';
@@ -63,6 +75,11 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
   const skipNoPurge = !harness.features.purgeByField;
   const skipNoArchive = !harness.features.archiveByFilter;
   const skipNoStreaming = !harness.features.streaming;
+  // String-op gates default to SUPPORTED (undefined → run): every kit
+  // that predates the flags already passes, so only an explicit `false`
+  // opts out.
+  const skipNoCaseSensitive = harness.features.caseSensitiveStringOps === false;
+  const skipNoLikeWildcards = skipNoCaseSensitive || harness.features.likeWildcards === false;
 
   describe(`[conformance] ${harness.name}`, () => {
     let ctx: ConformanceContext<TDoc>;
@@ -1249,6 +1266,59 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
       it('like with _ metacharacter in the value matches literally', async () => {
         const rows = await ctx.repo.findAll!(like('notes', 'file\\_name.txt'));
         expect(rows.map((r) => r.name)).toEqual(['under']);
+      });
+
+      // Case sensitivity — `'sensitive'` must be EXACT on every backend.
+      // SQLite LIKE folds ASCII case; MySQL `_ci` collations fold case and
+      // accents; `LIKE BINARY` matches bytes, so `_` hits half a multi-byte
+      // char. Each bit a kit once.
+      describe("case-sensitive string ops ('sensitive')", () => {
+        beforeEach(async () => {
+          await ctx.repo.createMany!(
+            ['run:a', 'Run:a', 'RUN:B', 'Élan', 'élan', 'qé', 'qz', 'a*b', 'q?', '[x]'].map(
+              (notes, i) =>
+                harness.makeDoc({ name: `cs${i}`, category: 'cs', count: 100 + i, notes }),
+            ),
+          );
+        });
+        const notesOf = async (filter: Parameters<NonNullable<typeof ctx.repo.findAll>>[0]) =>
+          (await ctx.repo.findAll!(and(eq('category', 'cs'), filter as never)))
+            .map((r) => r.notes)
+            .sort();
+
+        it.skipIf(skipNoCaseSensitive)('startsWith matches exact case only', async () => {
+          expect(await notesOf(startsWith('notes', 'run:', 'sensitive'))).toEqual(['run:a']);
+        });
+        // Ungated: every kit must fold ASCII case under the default.
+        it('the insensitive default still folds ASCII case', async () => {
+          expect(await notesOf(startsWith('notes', 'run:'))).toEqual(
+            ['RUN:B', 'Run:a', 'run:a'].sort(),
+          );
+        });
+        it.skipIf(skipNoCaseSensitive)('endsWith and contains match exact case only', async () => {
+          expect(await notesOf(endsWith('notes', ':B', 'sensitive'))).toEqual(['RUN:B']);
+          expect(await notesOf(contains('notes', 'UN', 'sensitive'))).toEqual(['RUN:B']);
+        });
+        it.skipIf(skipNoCaseSensitive)('non-ASCII case is exact', async () => {
+          expect(await notesOf(startsWith('notes', 'É', 'sensitive'))).toEqual(['Élan']);
+          expect(await notesOf(startsWith('notes', 'é', 'sensitive'))).toEqual(['élan']);
+        });
+        it.skipIf(skipNoLikeWildcards)(
+          "like's `_` is one character, even a multi-byte one",
+          async () => {
+            expect(await notesOf(like('notes', 'q_', 'sensitive'))).toEqual(
+              ['q?', 'qz', 'qé'].sort(),
+            );
+          },
+        );
+        it.skipIf(skipNoCaseSensitive)(
+          'glob / regex metacharacters in the value are literal',
+          async () => {
+            expect(await notesOf(startsWith('notes', 'a*', 'sensitive'))).toEqual(['a*b']);
+            expect(await notesOf(endsWith('notes', '?', 'sensitive'))).toEqual(['q?']);
+            expect(await notesOf(startsWith('notes', '[x', 'sensitive'))).toEqual(['[x]']);
+          },
+        );
       });
 
       it('nested and/or composes correctly', async () => {

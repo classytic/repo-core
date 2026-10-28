@@ -4,6 +4,16 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-10-29
+
+### Added - `RepoCapabilities.caseSensitiveStringOps` and `likeWildcards`
+
+Two optional flags. `caseSensitiveStringOps`: `like` / `startsWith` / `endsWith` / `contains` with `'sensitive'` match exactly (case and accents). `likeWildcards`: arbitrary `like` patterns (unescaped `_`, mid-pattern `%`) work. Absent means supported, so existing kits declare nothing; prismakit declares `false` where Prisma cannot express the match (SQLite, MySQL, SQL Server).
+
+### Added - case-sensitive string ops in the standard conformance suite (`./testing`)
+
+`runStandardRepoConformance` checks `'sensitive'` `startsWith` / `endsWith` / `contains` / `like` (exact case, non-ASCII case, `_` as one multi-byte character, glob/regex metacharacters literal) and that the insensitive default still folds ASCII case. The `'sensitive'` scenarios skip when `caseSensitiveStringOps === false`; the `like('q_')` scenario also skips when `likeWildcards === false`; the insensitive-default scenario always runs. Verified on mongokit, sqlitekit (both drivers), mysqlkit, pgkit and prismakit.
+
 ## [0.34.0] - 2026-10-27
 
 ### Added - `findAll` sort and limit in the standard conformance suite (`./testing`)
