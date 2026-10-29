@@ -397,13 +397,13 @@ export interface ClaimTransition {
    * returns `null`. The caller can't distinguish "lost race" from
    * "guard predicate failed" — both mean "don't proceed."
    *
-   * Cross-kit notes:
-   *   - Mongokit: ANDed into the `findOneAndUpdate` filter.
-   *   - SQL kits: ANDed into the `WHERE` clause (raw column literals
-   *     accepted; portable Filter IR is compiled).
-   *   - Prismakit: merged as additional keys on the `where` object.
+   * **Portable form: Filter IR** (`ne('paused', true)`,
+   * `or(lt('lastHeartbeat', stale), isNull('lastHeartbeat'))`) — every kit
+   * compiles it into its CAS match (`runStandardRepoConformance` pins
+   * this). A plain record is kit-native: Mongo operators on mongokit,
+   * column literals on SQL kits.
    */
-  where?: Record<string, unknown>;
+  where?: FilterInput;
 }
 
 /**
@@ -443,7 +443,7 @@ export interface TransitionArgs {
   /** Field paths cleared alongside the state write. */
   unset?: Record<string, unknown>;
   /** Additional CAS guards, AND-merged into the match (same as `ClaimTransition.where`). */
-  where?: Record<string, unknown>;
+  where?: FilterInput;
   by?: string;
   note?: string;
   /** History field name (default `'statusHistory'`), or `false` to skip the append. */
@@ -505,8 +505,9 @@ export interface ClaimVersionTransition {
    * guards, status guards (yard's `{ _id, status, version }`
    * pattern), sub-document `$elemMatch`. Without this, callers had
    * to fall back to raw `findOneAndUpdate` for state+version CAS.
+   * Filter IR is the portable form (see `ClaimTransition.where`).
    */
-  where?: Record<string, unknown>;
+  where?: FilterInput;
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -152,6 +152,54 @@ export function runStandardRepoConformance<TDoc extends ConformanceDoc = Conform
     });
 
     // ──────────────────────────────────────────────────────────────────
+    // claim — CAS guards in Filter IR (the portable `where` form)
+    // ──────────────────────────────────────────────────────────────────
+
+    describe('claim with a Filter IR `where`', () => {
+      let first: string;
+      let second: string;
+      beforeEach(async () => {
+        const make = (name: string) =>
+          ctx.repo.create(
+            harness.makeDoc({ name, email: `${name}@x.com`, category: 'queued', active: true }),
+          );
+        first = idOf(await make('c1'), harness.idField) as string;
+        second = idOf(await make('c2'), harness.idField) as string;
+      });
+
+      type Claimable = { claim?: (...a: unknown[]) => Promise<ConformanceDoc | null> };
+      const guarded = (where: unknown, from = 'queued') => ({
+        field: 'category',
+        from,
+        to: 'running',
+        where,
+      });
+
+      // The IR guard is ANDed with the id + state match — never replaces it. A kit that
+      // let an IR `where` stand in for the whole CAS filter transitioned whichever row
+      // matched the guard first; one that spread it raw dropped it or matched nothing.
+      it('claims exactly the requested row, only from its source state', async () => {
+        const repo = ctx.repo as Claimable;
+        if (!repo.claim) return;
+        const won = await repo.claim(second, guarded(and(eq('active', true), eq('count', 0))));
+        expect(idOf(won, harness.idField)).toBe(second);
+        expect(won?.category).toBe('running');
+        expect((await ctx.repo.getById(first))?.category).toBe('queued');
+        // Wrong source state: the guard passing must not win the CAS.
+        expect(await repo.claim(first, guarded(eq('active', true), 'running'))).toBeNull();
+        expect((await ctx.repo.getById(first))?.category).toBe('queued');
+      });
+
+      it('a failing IR guard returns null and writes nothing', async () => {
+        const repo = ctx.repo as Claimable;
+        if (!repo.claim) return;
+        expect(await repo.claim(first, guarded(eq('active', false)))).toBeNull();
+        expect((await ctx.repo.getById(first))?.category).toBe('queued');
+        expect((await ctx.repo.getById(second))?.category).toBe('queued');
+      });
+    });
+
+    // ──────────────────────────────────────────────────────────────────
     // findOneAndUpdate — atomic CAS
     // ──────────────────────────────────────────────────────────────────
 

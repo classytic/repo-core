@@ -19,6 +19,9 @@ export default defineConfig({
     'events/index': 'src/events/index.ts',
     'schema/index': 'src/schema/index.ts',
     'testing/index': 'src/testing/index.ts',
+    // The idempotency suite alone — the `./testing` barrel also loads the fast-check
+    // property suites, which a store package proving only this contract need not install.
+    'testing/idempotency': 'src/testing/idempotency-conformance.ts',
     'lookup/index': 'src/lookup/index.ts',
     'tenant/index': 'src/tenant/index.ts',
     'adapter/index': 'src/adapter/index.ts',

@@ -4,6 +4,20 @@ All notable changes to `@classytic/repo-core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-10-29
+
+### Changed - `where` on `ClaimTransition` / `ClaimVersionTransition` / `TransitionArgs` is `FilterInput`
+
+- The docs promised Filter IR there; the type said `Record<string, unknown>`, so callers cast. Filter IR is the portable form; a plain record stays kit-native.
+
+### Added - claim-with-IR-guard cases in `runStandardRepoConformance`
+
+- Two rows, an IR `where`: the claim must transition exactly the requested row, only from its source state, and a failing guard writes nothing. mongokit ≤ 3.43.1 let an IR `where` stand in for the whole CAS match — it transitioned whichever row matched the guard first, so a kit that has not shipped that fix fails these two cases. Verified passing on mongokit (with the fix), sqlitekit, pgkit, mysqlkit and prismakit.
+
+### Added - `./testing/idempotency`
+
+- `runIdempotencyStoreConformance` / `idempotencyStoreCases` alone. The `./testing` barrel also loads the fast-check property suites; a store package proving only this contract need not install fast-check.
+
 ## [0.35.0] - 2026-10-29
 
 ### Added - `RepoCapabilities.caseSensitiveStringOps` and `likeWildcards`
